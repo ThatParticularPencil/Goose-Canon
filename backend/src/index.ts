@@ -45,6 +45,7 @@ export const io = new IOServer(httpServer, {
 })
 
 const voteStore = new VoteStore()
+const solanaListenerEnabled = process.env.SOLANA_LISTENER_ENABLED === 'true'
 
 io.on('connection', (socket) => {
   console.log('[ws] client connected:', socket.id)
@@ -85,9 +86,13 @@ io.on('connection', (socket) => {
 
 // ── Solana on-chain listener ──────────────────────────────────────────────────
 
-setupSolanaListener(io, voteStore).catch(err => {
-  console.error('[solana] listener error:', err)
-})
+if (solanaListenerEnabled) {
+  setupSolanaListener(io, voteStore).catch(err => {
+    console.error('[solana] listener error:', err)
+  })
+} else {
+  console.log('[solana] listener disabled; running in demo mode')
+}
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
