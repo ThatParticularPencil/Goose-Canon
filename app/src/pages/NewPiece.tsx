@@ -36,7 +36,7 @@ export default function NewPiece() {
   const [submissionHours, setSubmissionHours] = useState(0.5 / 60)  // 30s default
   const [votingHours, setVotingHours]     = useState(0.5 / 60)      // 30s default
   const [maxSubmissions, setMaxSubmissions] = useState(20)
-  const [communityOnly, setCommunityOnly] = useState(true)
+  const [communityOnly, setCommunityOnly] = useState(false)
   const [submitting, setSubmitting]       = useState(false)
   const [submitStatus, setSubmitStatus]   = useState<string | null>(null)
   const [payError, setPayError]           = useState<string | null>(null)
@@ -255,8 +255,8 @@ export default function NewPiece() {
               <div className="rounded-2xl bg-parchment/[0.03] border border-parchment/10 p-6 mb-5 space-y-4">
                 <ConfirmRow label="Title"              value={title} />
                 <ConfirmRow label="Premise"            value={concept.trim() || '(using title as premise)'} />
-                <ConfirmRow label="Submission window"  value={`${submissionHours}h`} />
-                <ConfirmRow label="Voting window"      value={`${votingHours}h`} />
+                <ConfirmRow label="Submission window"  value={formatHourDisplay(submissionHours)} />
+                <ConfirmRow label="Voting window"      value={formatHourDisplay(votingHours)} />
                 <ConfirmRow label="Max submissions"    value={`${maxSubmissions} per round`} />
                 <ConfirmRow label="Access"             value={communityOnly ? 'Community only' : 'Open to all readers'} />
                 <ConfirmRow label="Rounds"             value={`${MAX_ROUNDS} (Intro → 6 Chapters → Conclusion)`} />
@@ -434,6 +434,9 @@ function SettingInput({ label, value, onChange, unit, min, max, hint }: {
   label: string; value: number; onChange: (v: number) => void
   unit: string; min: number; max: number; hint: string
 }) {
+  const displayValue = unit === 'hours' ? formatHourCount(value) : value
+  const displayUnit = unit === 'hours' ? pluralizeHours(displayValue) : unit
+
   return (
     <div className="rounded-xl border border-parchment/10 bg-parchment/[0.02] p-4">
       <div className="flex items-center justify-between mb-1.5">
@@ -441,10 +444,10 @@ function SettingInput({ label, value, onChange, unit, min, max, hint }: {
         <div className="flex items-center gap-2">
           <button onClick={() => onChange(Math.max(min, value - 1))}
             className="w-6 h-6 rounded border border-parchment/20 text-parchment/50 hover:text-parchment flex items-center justify-center text-sm transition-colors">−</button>
-          <span className="font-mono text-gold min-w-[3ch] text-center">{value}</span>
+          <span className="font-mono text-gold min-w-[3ch] text-center">{displayValue}</span>
           <button onClick={() => onChange(Math.min(max, value + 1))}
             className="w-6 h-6 rounded border border-parchment/20 text-parchment/50 hover:text-parchment flex items-center justify-center text-sm transition-colors">+</button>
-          <span className="text-xs text-parchment/40">{unit}</span>
+          <span className="text-xs text-parchment/40">{displayUnit}</span>
         </div>
       </div>
       <p className="text-xs text-parchment/30">{hint}</p>
@@ -493,4 +496,17 @@ function ConfirmRow({ label, value }: { label: string; value: string }) {
       <span className="text-sm text-parchment/75 text-right">{value}</span>
     </div>
   )
+}
+
+function formatHourCount(value: number) {
+  return Math.max(1, Math.round(value))
+}
+
+function pluralizeHours(value: number) {
+  return value === 1 ? 'hour' : 'hours'
+}
+
+function formatHourDisplay(value: number) {
+  const hours = formatHourCount(value)
+  return `${hours} ${pluralizeHours(hours)}`
 }
