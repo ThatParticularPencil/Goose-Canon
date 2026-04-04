@@ -73,7 +73,7 @@ export default function Navbar() {
             </Link>
           )}
 
-          {role === 'creator' && <WalletMultiButton />}
+          {(role === 'creator' || role === 'viewer') && <WalletMultiButton />}
         </div>
       </div>
     </nav>

@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useParams, Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Lock, ArrowRight, Share2, CheckCircle2, BarChart2, Loader2 } from 'lucide-react'
+import { Lock, ArrowRight, Share2, CheckCircle2, BarChart2, Loader2, Copy, Check, Sparkles, Mic2 } from 'lucide-react'
 import { useRole } from '@/context/RoleContext'
 import SealedParagraphCard from '@/components/SealedParagraphCard'
 import OnChainRecord from '@/components/OnChainRecord'
@@ -13,23 +13,95 @@ import { PublicKey } from '@solana/web3.js'
 import type { SealedParagraph } from '@/types'
 
 const MAX_PARAGRAPHS = 8
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000'
 
 export default function PieceView() {
   const { pieceId } = useParams()
+  const location = useLocation()
   const [showDetails, setShowDetails] = useState(false)
   const [selectedPara, setSelectedPara] = useState<number | null>(null)
 
   const { role } = useRole()
   const isCreator = role === 'creator'
+  const [copied, setCopied] = useState(false)
+  const [narrationUrl, setNarrationUrl] = useState<string | null>(null)
+  const [narrationLoading, setNarrationLoading] = useState(false)
+  const [narrationError, setNarrationError] = useState<string | null>(null)
 
-  const { piece, loading, error } = usePiece(pieceId)
+  const preserveDemoProgress = location.state?.preserveDemoProgress === true
+  const { piece, loading, error } = usePiece(pieceId, {
+    resetDemoOnLoad: !preserveDemoProgress,
+  })
+
+  const handleCopyScript = () => {
+    if (!piece) return
+    const fullScript = piece.paragraphs
+      .map((p, i) => {
+        const label = i === 0 ? 'OPENING' : `SCENE ${i}`
+        return `— ${label} —\n\n${(p as any).content ?? ''}`
+      })
+      .join('\n\n\n')
+    navigator.clipboard.writeText(`${piece.title}\n\n${fullScript}`)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (narrationUrl) URL.revokeObjectURL(narrationUrl)
+    }
+  }, [narrationUrl])
+
+  const handleGenerateNarration = async () => {
+    if (!piece) return
+
+    setNarrationLoading(true)
+    setNarrationError(null)
+
+    if (narrationUrl) {
+      URL.revokeObjectURL(narrationUrl)
+      setNarrationUrl(null)
+    }
+
+    const fullScript = piece.paragraphs
+      .map((p, i) => {
+        const label = i === 0 ? 'Opening' : `Scene ${i}`
+        return `${label}.\n${(p as any).content ?? ''}`
+      })
+      .join('\n\n')
+
+    try {
+      const response = await fetch(`${BACKEND}/api/ai/narrate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: piece.title,
+          text: `${piece.title}.\n\n${fullScript}`,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || 'Narration failed')
+      }
+
+      const blob = await response.blob()
+      setNarrationUrl(URL.createObjectURL(blob))
+    } catch (err: any) {
+      setNarrationError(err?.message || 'Narration failed')
+    } finally {
+      setNarrationLoading(false)
+    }
+  }
+
+  // ── Loading state ──────────────────────────────────────────────────────────
 
   if (loading) {
     return (
       <main className="min-h-screen pt-14 pb-24 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-ink-tertiary">
+        <div className="flex flex-col items-center gap-3 text-ink-tertiary font-mono">
           <Loader2 size={20} className="animate-spin" />
-          <p className="text-sm font-mono">Loading from chain...</p>
+          <p className="text-sm">Loading from chain…</p>
         </div>
       </main>
     )
@@ -46,6 +118,7 @@ export default function PieceView() {
   const isComplete = piece.paragraphCount >= MAX_PARAGRAPHS
   const activeRound = piece.activeRound
 
+  // Convert usePiece paragraphs to the SealedParagraphCard shape
   const paragraphs = piece.paragraphs.map(p => ({
     publicKey: PublicKey.default,
     piece:     PublicKey.default,
@@ -56,6 +129,7 @@ export default function PieceView() {
     sealedAt:    p.sealedAt,
     voteCount:   p.voteCount,
     isOpening:   p.isOpening,
+    // Off-chain extras
     content:          (p as any).content,
     authorHandle:     (p as any).authorHandle,
     winningDirection: (p as any).winningDirection,
@@ -68,6 +142,7 @@ export default function PieceView() {
 
         {/* Header */}
         <motion.div
+          id="story-top"
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           className="pt-12 mb-10 border-b border-straw pb-8"
@@ -75,20 +150,56 @@ export default function PieceView() {
           <div className="flex items-start justify-between gap-4 mb-5">
             <div className="flex-1">
               <p className="text-label uppercase tracking-[0.08em] text-ink-tertiary mb-2">
-                by {piece.creatorHandle ?? `${piece.creator.slice(0, 4)}...${piece.creator.slice(-4)}`}
+                by {piece.creatorHandle ?? `${piece.creator.slice(0, 4)}…${piece.creator.slice(-4)}`}
               </p>
-              <h1 className="font-mono font-bold text-3xl md:text-4xl text-ink leading-snug">
+              <h1 className="font-mono font-bold text-display-md md:text-display-lg text-ink leading-[1.08] tracking-[-0.02em]">
                 {piece.title}
               </h1>
             </div>
-            <button
-              onClick={() => navigator.clipboard.writeText(window.location.href)}
-              className="flex-shrink-0 p-2 text-ink-tertiary hover:text-ink transition-colors mt-1"
-              title="Copy link"
-            >
-              <Share2 size={15} />
-            </button>
+            <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+              {isCreator && piece && piece.paragraphs.length > 0 && (
+                <>
+                  <button
+                    onClick={handleGenerateNarration}
+                    disabled={narrationLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-straw text-ink-secondary hover:text-ink hover:border-sage transition-all text-xs font-mono font-bold disabled:opacity-50 disabled:cursor-wait"
+                    title="Generate voice narration"
+                  >
+                    {narrationLoading ? <Loader2 size={12} className="animate-spin" /> : <Mic2 size={12} />}
+                    {narrationLoading ? 'Narrating…' : narrationUrl ? 'Regenerate voice' : 'Voice narration'}
+                  </button>
+                  <button
+                    onClick={handleCopyScript}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] border border-straw text-ink-secondary hover:text-ink hover:border-sage transition-all text-xs font-mono font-bold"
+                    title="Copy full script"
+                  >
+                    {copied ? <Check size={12} className="text-sage" /> : <Copy size={12} />}
+                    {copied ? 'Copied!' : 'Copy script'}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => navigator.clipboard.writeText(window.location.href)}
+                className="p-2 text-ink-tertiary hover:text-ink-secondary transition-colors"
+                title="Copy link"
+              >
+                <Share2 size={15} />
+              </button>
+            </div>
           </div>
+
+          {isCreator && (narrationUrl || narrationError) && (
+            <div className="mt-4 space-y-2">
+              {narrationUrl && (
+                <audio controls src={narrationUrl} className="w-full h-10">
+                  Your browser does not support audio playback.
+                </audio>
+              )}
+              {narrationError && (
+                <p className="text-xs text-red-600 font-mono">{narrationError}</p>
+              )}
+            </div>
+          )}
 
           {/* Part progress bar */}
           <div className="space-y-3">
@@ -102,7 +213,7 @@ export default function PieceView() {
                   <div
                     key={i}
                     className={`h-1 flex-1 rounded-full transition-colors ${
-                      i < piece.paragraphCount ? 'bg-sage' : 'bg-parchment'
+                      i < piece.paragraphCount ? 'bg-seal' : 'bg-straw'
                     }`}
                   />
                 ))}
@@ -115,7 +226,7 @@ export default function PieceView() {
                 {piece.roundCount} rounds
               </span>
               {error && (
-                <span className="text-amber-600">Chain read error — showing cached data</span>
+                <span className="text-red-600">⚠ Chain read error — showing cached data</span>
               )}
             </div>
           </div>
@@ -125,7 +236,7 @@ export default function PieceView() {
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-4 flex items-center gap-2.5 p-3 rounded-[8px] bg-seal-light/50 border border-seal/20"
+              className="mt-4 flex items-center gap-2.5 p-3 rounded-[8px] bg-seal-light/50 border border-seal/30"
             >
               <CheckCircle2 size={14} className="text-seal flex-shrink-0" />
               <p className="text-xs text-ink-secondary font-mono">
@@ -135,87 +246,104 @@ export default function PieceView() {
           )}
 
           {/* Active round banner */}
-          {!isComplete && activeRound && activeRound.status === 'Voting' && (
-            <div className="mt-4 flex items-center justify-between p-3 rounded-[8px] border border-straw bg-paper">
-              <RoundTimer deadline={activeRound.votingDeadline} label="Voting closes" />
-              {isCreator ? (
-                <span className="flex items-center gap-1.5 text-xs text-ink-tertiary font-mono">
-                  <BarChart2 size={11} />
-                  {activeRound.totalVotes.toLocaleString()} votes live
-                </span>
-              ) : (
-                <Link to={`/piece/${pieceId}/round/${activeRound.roundIndex}`}>
-                  <button className="flex items-center gap-1.5 text-xs text-sage-dark hover:text-sage transition-colors font-mono font-bold">
-                    Vote now
-                    <ArrowRight size={12} />
-                  </button>
-                </Link>
-              )}
-            </div>
-          )}
-
-          {!isComplete && activeRound && activeRound.status === 'Submissions' && (
-            <div className="mt-4 flex items-center justify-between p-3 rounded-[8px] border border-straw bg-paper">
-              <RoundTimer deadline={activeRound.submissionDeadline} label="Submissions close" />
-              {!isCreator && (
-                <Link to={`/piece/${pieceId}/round/${activeRound.roundIndex}`}>
-                  <button className="flex items-center gap-1.5 text-xs text-sage-dark hover:text-sage transition-colors font-mono font-bold">
-                    Submit direction
-                    <ArrowRight size={12} />
-                  </button>
-                </Link>
-              )}
+          {!isComplete && activeRound && (
+            <div className="mt-4 p-3 rounded-[8px] border border-straw bg-paper">
+              <div className="flex items-center justify-between">
+                {activeRound.status === 'Voting' && <RoundTimer deadline={activeRound.votingDeadline} label="Voting closes" />}
+                {activeRound.status === 'Submissions' && <RoundTimer deadline={activeRound.submissionDeadline} label="Submissions close" />}
+                {activeRound.status === 'Runoff' && <RoundTimer deadline={activeRound.runoffDeadline} label="Runoff closes" />}
+                {activeRound.status !== 'Voting' && activeRound.status !== 'Submissions' && activeRound.status !== 'Runoff' && (
+                  <span className="text-xs text-ink-tertiary font-mono">Round {activeRound.roundIndex + 1}</span>
+                )}
+                <div className="flex items-center gap-2">
+                  {isCreator && (
+                    <span className="flex items-center gap-1.5 text-xs text-ink-tertiary font-mono">
+                      <BarChart2 size={11} />
+                      {activeRound.totalVotes.toLocaleString()} votes
+                    </span>
+                  )}
+                  {!isCreator && (
+                    <Link to={`/piece/${pieceId}/round/${activeRound.roundIndex}`}>
+                      <button className="flex items-center gap-1.5 text-xs text-sage-dark hover:text-sage transition-colors font-mono font-bold">
+                        {activeRound.status === 'Submissions' ? 'Submit direction' : activeRound.status === 'Runoff' ? 'Vote in runoff' : 'Vote now'}
+                        <ArrowRight size={12} />
+                      </button>
+                    </Link>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </motion.div>
 
         {/* Paragraphs */}
-        <div className="divide-y divide-straw/50 mb-12">
-          {paragraphs.map((para, i) => (
-            <div
-              key={para.index}
-              onClick={() => setSelectedPara(selectedPara === para.index ? null : para.index)}
-              className="py-7 cursor-pointer"
-            >
-              <SealedParagraphCard
-                paragraph={para}
-                index={i}
-                showChainDetails={selectedPara === para.index}
-              />
-            </div>
-          ))}
+        <div className="divide-y divide-straw mb-12">
+          {paragraphs.map((para, i) => {
+            const isLatest = i === paragraphs.length - 1 && paragraphs.length > 1
+            return (
+              <div
+                key={para.index}
+                onClick={() => setSelectedPara(selectedPara === para.index ? null : para.index)}
+                className="py-7 cursor-pointer"
+              >
+                {isLatest && (
+                  <div className="flex items-center gap-2 mb-3">
+                    <Sparkles size={11} className="text-sage-dark" />
+                    <span className="text-label uppercase tracking-[0.08em] text-sage-dark font-bold">
+                      Latest scene · expanded from the winning choice
+                    </span>
+                  </div>
+                )}
+                <SealedParagraphCard
+                  paragraph={para}
+                  index={i}
+                  showChainDetails={selectedPara === para.index}
+                />
+              </div>
+            )
+          })}
         </div>
 
-        {/* Story continues */}
+        {/* Next round CTA */}
         {!isComplete && activeRound && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            className="mb-14"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="mb-14 p-6 rounded-[8px] border border-sage/30 bg-sage-light/40"
           >
-            <p className="font-serif italic text-ink-tertiary text-lg mb-4">
-              {isCreator
-                ? 'Your community is deciding what happens next...'
-                : 'What happens next is being decided right now...'
-              }
-            </p>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-8 h-8 rounded-full bg-sage border border-sage-dark flex items-center justify-center flex-shrink-0">
+                <span className="text-white text-xs font-bold font-mono">{activeRound.roundIndex + 1}</span>
+              </div>
+              <div>
+                <p className="text-sm font-mono font-bold text-ink">Round {activeRound.roundIndex + 1} is live</p>
+                <p className="text-xs text-ink-secondary mt-0.5 font-mono">
+                  {activeRound.status === 'Submissions' && `${activeRound.submissionCount} directions submitted · submit yours before time runs out`}
+                  {activeRound.status === 'Voting' && `${activeRound.totalVotes.toLocaleString()} votes cast · pick the direction you want`}
+                  {activeRound.status === 'Runoff' && `Top ${Math.min(activeRound.submissionCount, 5)} finalists · ${activeRound.totalRunoffVotes.toLocaleString()} runoff votes`}
+                  {activeRound.status === 'Closed' && 'Generating next scene…'}
+                </p>
+              </div>
+            </div>
+
             {isCreator ? (
-              <div className="flex items-center gap-5 text-xs text-ink-tertiary font-mono">
-                <span className="flex items-center gap-1.5">
-                  <BarChart2 size={11} />
-                  {activeRound.totalVotes.toLocaleString()} votes cast
-                </span>
-                <span>{activeRound.submissionCount} directions submitted</span>
-                <span>Round {activeRound.roundIndex + 1} in progress</span>
+              <div className="flex items-center gap-4 text-xs text-ink-tertiary font-mono">
+                <span className="flex items-center gap-1.5"><BarChart2 size={11} />{activeRound.totalVotes.toLocaleString()} votes</span>
+                <span>{activeRound.submissionCount} directions</span>
               </div>
             ) : (
-              <Link to={`/piece/${pieceId}/round/${activeRound.roundIndex}`}>
-                <button className="flex items-center gap-2 text-sm text-sage-dark hover:text-sage transition-colors font-mono font-bold">
-                  Read & vote on Round {activeRound.roundIndex + 1}
-                  <ArrowRight size={13} />
-                </button>
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link to={`/piece/${pieceId}/round/${activeRound.roundIndex}`} className="flex-1">
+                  <button className="w-full flex items-center justify-center gap-2 h-10 rounded-[8px] bg-sage text-white text-sm font-mono font-bold hover:bg-sage-dark transition-all">
+                    {activeRound.status === 'Submissions' ? 'Submit a direction' : 'Vote now'}
+                    <ArrowRight size={13} />
+                  </button>
+                </Link>
+                <a href="#story-top" className="flex items-center gap-1.5 text-xs text-ink-tertiary hover:text-ink-secondary transition-colors whitespace-nowrap font-mono">
+                  Read story
+                </a>
+              </div>
             )}
           </motion.div>
         )}
@@ -228,7 +356,7 @@ export default function PieceView() {
           >
             <div>
               <p className="text-label uppercase tracking-[0.08em] text-ink-tertiary mb-1">Blockchain record</p>
-              <p className="font-mono text-ink-secondary group-hover:text-ink transition-colors">
+              <p className="font-mono font-bold text-ink group-hover:text-sage transition-colors">
                 On-chain proof for Part {piece.paragraphCount}
               </p>
             </div>
@@ -250,7 +378,7 @@ export default function PieceView() {
                 totalVotesCast: activeRound?.totalVotes ?? DEMO_CHAIN_RECORD.totalVotesCast,
                 sealedBlock:    DEMO_CHAIN_RECORD.sealedBlock,
                 sealedAt:       DEMO_CHAIN_RECORD.sealedAt,
-                contentHash:    lastPara ? `${lastPara.arweaveUri.slice(0, 20)}...` : DEMO_CHAIN_RECORD.contentHash,
+                contentHash:    lastPara ? `${lastPara.arweaveUri.slice(0, 20)}…` : DEMO_CHAIN_RECORD.contentHash,
                 arweaveUri:     lastPara?.arweaveUri ?? DEMO_CHAIN_RECORD.arweaveUri,
                 programId:      DEMO_CHAIN_RECORD.programId,
               }} />

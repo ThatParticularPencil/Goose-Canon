@@ -3,15 +3,18 @@ import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { Plus, ArrowRight, Eye } from 'lucide-react'
-import { DEMO_PIECE, DEMO_ACTIVE_ROUND } from '@/utils/demo-data'
+import { Plus, ArrowRight, Eye, Loader2, Sparkles } from 'lucide-react'
+import { usePiece } from '@/hooks/usePiece'
 import RoundTimer from '@/components/RoundTimer'
 import DotPattern from '@/components/DotPattern'
 import { clsx } from 'clsx'
 
+const CREATOR_DEMO_PIECE_ID = 'demo-live-1'
+
 export default function CreatorDashboard() {
   const { publicKey } = useWallet()
   const [activeTab, setActiveTab] = useState<'pieces' | 'subscribers'>('pieces')
+  const { piece, loading } = usePiece(CREATOR_DEMO_PIECE_ID, { resetDemoOnLoad: false })
 
   if (!publicKey) {
     return (
@@ -27,14 +30,12 @@ export default function CreatorDashboard() {
     )
   }
 
-  const walletShort = `${publicKey.toString().slice(0, 4)}...${publicKey.toString().slice(-4)}`
+  const walletShort = `${publicKey.toString().slice(0, 4)}…${publicKey.toString().slice(-4)}`
 
   return (
     <main className="min-h-screen pt-20 pb-24 relative">
       <DotPattern />
       <div className="max-w-3xl mx-auto px-6 relative z-10">
-
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -42,7 +43,7 @@ export default function CreatorDashboard() {
         >
           <div>
             <p className="text-label uppercase tracking-[0.08em] text-ink-tertiary mb-1.5">{walletShort}</p>
-            <h1 className="font-mono text-display-md text-ink">Your Stories</h1>
+            <h1 className="font-mono font-bold text-display-md text-ink">Your pieces</h1>
           </div>
           <Link to="/new">
             <motion.button
@@ -56,7 +57,6 @@ export default function CreatorDashboard() {
           </Link>
         </motion.div>
 
-        {/* Tabs */}
         <div className="flex items-center gap-6 mb-8 text-sm font-mono">
           {(['pieces', 'subscribers'] as const).map(tab => (
             <button
@@ -75,14 +75,16 @@ export default function CreatorDashboard() {
         </div>
 
         {activeTab === 'pieces' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="space-y-5"
-          >
-            <PieceManageCard piece={DEMO_PIECE} activeRound={DEMO_ACTIVE_ROUND} />
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-5">
+            {loading && (
+              <div className="flex items-center gap-2 text-sm text-ink-tertiary py-6 font-mono">
+                <Loader2 size={16} className="animate-spin" />
+                Loading piece state…
+              </div>
+            )}
 
-            {/* Start another */}
+            {piece && <PieceManageCard />}
+
             <Link to="/new">
               <div className="py-8 border border-dashed border-straw rounded-[8px] text-center hover:border-sage transition-colors cursor-pointer group">
                 <Plus size={16} className="mx-auto text-ink-tertiary group-hover:text-sage mb-2 transition-colors" />
@@ -100,15 +102,16 @@ export default function CreatorDashboard() {
   )
 }
 
-function PieceManageCard({
-  piece,
-  activeRound,
-}: {
-  piece: typeof DEMO_PIECE
-  activeRound: typeof DEMO_ACTIVE_ROUND
-}) {
+function PieceManageCard() {
+  const { piece } = usePiece(CREATOR_DEMO_PIECE_ID, { resetDemoOnLoad: false })
   const [showNote, setShowNote] = useState(false)
   const [note, setNote] = useState('')
+
+  if (!piece || !piece.activeRound) return null
+
+  const activeRound = piece.activeRound
+  const latestParagraph = piece.paragraphs[piece.paragraphs.length - 1]
+  const generatedSceneVisible = piece.paragraphs.length > 1
 
   return (
     <motion.div
@@ -116,7 +119,6 @@ function PieceManageCard({
       animate={{ opacity: 1, y: 0 }}
       className="border border-straw rounded-[8px] overflow-hidden bg-paper hover:border-ink-tertiary/40 transition-colors"
     >
-      {/* Piece header */}
       <div className="p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
@@ -124,7 +126,7 @@ function PieceManageCard({
               <div className="live-dot scale-75" />
               <span className="text-label uppercase tracking-[0.08em] text-sage font-bold">Active · Round {activeRound.roundIndex + 1}</span>
             </div>
-            <h3 className="font-mono font-bold text-xl text-ink leading-snug">{piece.title}</h3>
+            <h3 className="font-mono font-bold text-xl text-ink leading-snug tracking-[-0.01em]">{piece.title}</h3>
           </div>
           <Link to={`/piece/${piece.id}`}>
             <button className="p-2 rounded-[8px] text-ink-tertiary hover:text-ink hover:bg-parchment transition-all">
@@ -136,15 +138,28 @@ function PieceManageCard({
         <div className="flex items-center gap-4 text-xs text-ink-tertiary font-mono">
           <span>{piece.paragraphCount} parts sealed</span>
           <span>·</span>
-          <span>{piece.roundCount} rounds done</span>
+          <span>{piece.roundCount} rounds total</span>
         </div>
+
+        {generatedSceneVisible && latestParagraph?.content && (
+          <div className="mt-5 p-4 rounded-[8px] border border-seal/20 bg-seal-light/50">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={12} className="text-seal" />
+              <span className="text-label uppercase tracking-[0.08em] text-seal font-bold">Latest sealed scene</span>
+            </div>
+            <p className="text-sm font-serif text-ink-secondary leading-7">
+              {latestParagraph.content}
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Active round stats */}
       <div className="px-6 py-4 border-t border-straw bg-parchment/30">
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs text-ink-secondary font-mono">Round {activeRound.roundIndex + 1} — {activeRound.status}</p>
-          <RoundTimer deadline={activeRound.votingDeadline} label="closes" />
+          {activeRound.status === 'Voting' && <RoundTimer deadline={activeRound.votingDeadline} label="closes" />}
+          {activeRound.status === 'Submissions' && <RoundTimer deadline={activeRound.submissionDeadline} label="closes" />}
+          {activeRound.status === 'Runoff' && <RoundTimer deadline={activeRound.runoffDeadline} label="closes" />}
         </div>
         <div className="flex items-center gap-8 text-sm">
           <div>
@@ -152,13 +167,14 @@ function PieceManageCard({
             <p className="text-xs text-ink-tertiary mt-0.5">directions submitted</p>
           </div>
           <div>
-            <p className="text-lg font-mono font-bold text-ink">{activeRound.totalVotes.toLocaleString()}</p>
+            <p className="text-lg font-mono font-bold text-ink">
+              {(activeRound.status === 'Runoff' ? activeRound.totalRunoffVotes : activeRound.totalVotes).toLocaleString()}
+            </p>
             <p className="text-xs text-ink-tertiary mt-0.5">votes cast</p>
           </div>
         </div>
       </div>
 
-      {/* Actions */}
       <div className="px-6 py-4 border-t border-straw flex items-center gap-3 flex-wrap">
         <Link to={`/piece/${piece.id}/creator-round/${activeRound.roundIndex}`}>
           <button className="flex items-center gap-1.5 text-sm text-sage-dark hover:text-sage transition-colors font-mono font-bold">
@@ -184,7 +200,7 @@ function PieceManageCard({
           <textarea
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder="Guide the community without overriding them..."
+            placeholder="Guide the community without overriding them…"
             rows={3}
             className="w-full mt-4 bg-canvas border border-straw rounded-[8px] p-3.5 text-sm text-ink placeholder:text-ink-tertiary focus:outline-none focus:border-sage resize-none transition-colors font-serif italic"
           />
@@ -199,35 +215,28 @@ function PieceManageCard({
 
 function SubscribersPanel() {
   const [walletInput, setWalletInput] = useState('')
-  const [tier, setTier] = useState<'InnerCircle' | 'Community' | 'Reader'>('Community')
+  const [tier, setTier] = useState<'Community' | 'Reader'>('Community')
 
   const DEMO_SUBSCRIBERS = [
-    { wallet: '3kMn...7pQs', handle: '@devsmith_codes', tier: 'InnerCircle' as const },
-    { wallet: '7rTv...2nBw', handle: '@maya_writes', tier: 'InnerCircle' as const },
+    { wallet: '3kMn...7pQs', handle: '@devsmith_codes', tier: 'Community' as const },
+    { wallet: '7rTv...2nBw', handle: '@maya_writes', tier: 'Community' as const },
     { wallet: '2wXq...5mRo', handle: '@storyhunter_em', tier: 'Community' as const },
     { wallet: '5pNm...8kLj', handle: '@techwriter_ravi', tier: 'Community' as const },
-    { wallet: '9cYs...3vPt', handle: '@inkandcode', tier: 'InnerCircle' as const },
+    { wallet: '9cYs...3vPt', handle: '@inkandcode', tier: 'Community' as const },
   ]
 
   const TIER_LABELS = {
-    InnerCircle: 'Inner Circle',
     Community: 'Community',
     Reader: 'Reader',
   }
 
   const TIER_COLORS = {
-    InnerCircle: 'text-seal',
     Community: 'text-sage',
     Reader: 'text-ink-tertiary',
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="space-y-6"
-    >
-      {/* Add */}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
       <div className="border border-straw rounded-[8px] p-5 bg-paper">
         <p className="text-sm text-ink-secondary mb-4 font-mono">Add a subscriber</p>
         <div className="flex gap-3 flex-wrap">
@@ -243,8 +252,7 @@ function SubscribersPanel() {
             onChange={e => setTier(e.target.value as typeof tier)}
             className="bg-canvas border border-straw rounded-[8px] px-4 py-2.5 text-sm text-ink-secondary focus:outline-none focus:border-sage transition-colors font-mono"
           >
-            <option value="InnerCircle">Inner Circle — submit + vote</option>
-            <option value="Community">Community — vote only</option>
+            <option value="Community">Community — submit + vote</option>
             <option value="Reader">Reader — read only</option>
           </select>
           <button className="border border-sage text-sage px-5 py-2.5 rounded-[8px] text-sm font-mono font-bold hover:bg-sage hover:text-white transition-all">
@@ -253,7 +261,6 @@ function SubscribersPanel() {
         </div>
       </div>
 
-      {/* List */}
       <div className="border border-straw rounded-[8px] overflow-hidden bg-paper">
         <div className="px-5 py-3.5 border-b border-straw">
           <p className="text-label uppercase tracking-[0.08em] text-ink-tertiary">{DEMO_SUBSCRIBERS.length} subscribers</p>

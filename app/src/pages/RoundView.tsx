@@ -1,43 +1,25 @@
-import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useParams, Navigate, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Send, AlertCircle, CheckCircle2, Lock, Sparkles,
-  FileText, Users, Zap, ChevronRight, Ban,
+  Users, Zap, Ban, Loader2, Clock, Trophy, ArrowRight,
 } from 'lucide-react'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { sendSolPayment } from '@/utils/solana'
 import { useRole } from '@/context/RoleContext'
-import { Navigate } from 'react-router-dom'
-import VoteBar from '@/components/VoteBar'
 import RoundTimer from '@/components/RoundTimer'
 import OnChainRecord from '@/components/OnChainRecord'
-import {
-  DEMO_STAGE1_POOL,
-  DEMO_ACTIVE_ROUND,
-  DEMO_PIECE,
-  DEMO_CHAIN_RECORD,
-  DEMO_PARAGRAPHS,
-} from '@/utils/demo-data'
-import type { DemoSubmission } from '@/types'
+import DotPattern from '@/components/DotPattern'
+import { DEMO_CHAIN_RECORD } from '@/utils/demo-data'
+import { getRoundLabel } from '@/pages/NewPiece'
 import { clsx } from 'clsx'
 
-// ── API ────────────────────────────────────────────────────────────────────────
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000'
 
-async function apiGenerateScript(
-  winningDirection: string,
-  storyContext: string,
-  pieceTitle: string
-): Promise<string> {
-  const res = await fetch('/api/ai/generate-script', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ winningDirection, storyContext, pieceTitle }),
-  })
-  if (!res.ok) throw new Error('Gemini unavailable')
-  return (await res.json()).script as string
-}
+// ── API helpers ────────────────────────────────────────────────────────────────
+
 
 async function apiVoteReaction(directionText: string, voteCount: number): Promise<string> {
   const res = await fetch('/api/ai/vote-reaction', {
@@ -49,72 +31,125 @@ async function apiVoteReaction(directionText: string, voteCount: number): Promis
   return (await res.json()).reaction as string
 }
 
-async function apiSealReaction(script: string, pieceTitle: string): Promise<string> {
-  const res = await fetch('/api/ai/seal-reaction', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sealedScript: script, pieceTitle }),
-  })
-  if (!res.ok) throw new Error('unavailable')
-  return (await res.json()).reaction as string
+// ── Countdown banner ───────────────────────────────────────────────────────────
+
+function CountdownBanner({ deadline, label, color = 'gold' }: { deadline: number; label: string; color?: 'gold' | 'green' | 'amber' }) {
+  const [ms, setMs] = useState(() => Math.max(0, deadline - Date.now()))
+
+  useEffect(() => {
+    setMs(Math.max(0, deadline - Date.now()))
+  }, [deadline])
+
+  useEffect(() => {
+    if (ms <= 0) return
+    const id = setInterval(() => {
+      const next = Math.max(0, deadline - Date.now())
+      setMs(next)
+      if (next <= 0) clearInterval(id)
+    }, 250)
+    return () => clearInterval(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deadline])
+
+  const secs     = Math.floor((ms / 1000) % 60)
+  const mins     = Math.floor(ms / 1000 / 60)
+  const isAlmost = ms > 0 && ms < 10_000  // < 10 s
+
+  const barColor  = isAlmost ? 'bg-red-400' : color === 'green' ? 'bg-green-400' : color === 'amber' ? 'bg-amber-400' : 'bg-sage'
+  const textColor = isAlmost ? 'text-red-400' : color === 'green' ? 'text-green-400' : color === 'amber' ? 'text-amber-400' : 'text-sage-dark'
+
+  // When timer hits zero, show a clean "Finished" state
+  if (ms <= 0) {
+    return (
+      <div className="mb-6 px-4 py-3 rounded-xl border border-straw bg-parchment flex items-center gap-3">
+        <div className="w-1.5 h-1.5 rounded-full bg-straw" />
+        <span className="text-xs text-ink-tertiary uppercase tracking-widest font-medium">Finished</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-6 p-4 rounded-xl border border-straw bg-parchment">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className={clsx('w-2 h-2 rounded-full animate-pulse', barColor)} />
+          <span className="text-xs text-ink-tertiary uppercase tracking-widest">{label}</span>
+        </div>
+        <div className={clsx('font-mono text-2xl font-bold tabular-nums tracking-tight', textColor)}>
+          {String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
+        </div>
+      </div>
+      <div className="h-1.5 bg-straw rounded-full overflow-hidden">
+        <motion.div
+          className={clsx('h-full rounded-full transition-colors duration-1000', barColor)}
+          animate={{ width: `${Math.max(0.5, (ms / Math.max(ms, 60_000)) * 100)}%` }}
+          transition={{ duration: 0.25, ease: 'linear' }}
+        />
+      </div>
+    </div>
+  )
 }
 
-// ── Stage type ─────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
-type Stage =
-  | 'stage1'      // Submission open: submit your 50-word direction
-  | 'stage2'      // All directions go to vote (can't vote for your own)
-  | 'generating'  // Gemini writing the professional script from winning direction
-  | 'review'      // Creator reviews the AI script
-  | 'publishing'  // Broadcasting to Solana devnet
-  | 'published'   // Sealed on-chain — new paragraph added
+interface Submission {
+  id: string
+  content: string
+  contributor: string
+  contributorHandle: string
+  voteCount: number
+  runoffVoteCount: number
+  inRunoff: boolean
+}
+
+type RoundStatus = 'Submissions' | 'Voting' | 'Runoff' | 'Closed'
+type UiPhase = 'live' | 'generating' | 'sealing' | 'done'
 
 // ── Stage progress bar ─────────────────────────────────────────────────────────
 
-function StageBar({ current }: { current: Stage }) {
+function StageBar({ roundStatus, uiPhase }: { roundStatus: RoundStatus; uiPhase: UiPhase }) {
   const steps = [
-    { label: '1  Submit Direction' },
-    { label: '2  Vote'            },
-    { label: '3  AI Script'       },
-    { label: '4  On-Chain'        },
+    { label: 'Submit'   },
+    { label: 'Vote'     },
+    { label: 'Runoff'   },
+    { label: 'AI Scene' },
   ]
-  const activeIdx = (
-    current === 'stage1'     ? 0 :
-    current === 'stage2'     ? 1 :
-    current === 'generating' || current === 'review' ? 2 :
-    3
-  )
+  const activeIdx =
+    uiPhase === 'generating' || uiPhase === 'sealing' || uiPhase === 'done' ? 3 :
+    roundStatus === 'Submissions' ? 0 :
+    roundStatus === 'Voting'      ? 1 :
+    roundStatus === 'Runoff'      ? 2 : 3
+
   return (
     <div className="flex items-center gap-0 mb-10 w-full">
       {steps.map((step, i) => {
-        const done = i < activeIdx
+        const done   = i < activeIdx
         const active = i === activeIdx
         return (
           <div key={i} className="flex items-center flex-1 min-w-0">
-            <div className={clsx(
-              'flex items-center gap-2 flex-shrink-0 transition-all duration-500',
-              done ? 'opacity-100' : active ? 'opacity-100' : 'opacity-30'
-            )}>
-              <div className={clsx(
-                'w-6 h-6 rounded-full flex items-center justify-center border text-[11px] font-bold transition-all duration-500',
-                done  ? 'bg-sage-light/20 border-sage/60 text-sage-dark' :
-                active ? 'bg-sage-light/15 border-sage/50 text-sage-dark ring-2 ring-sage/20' :
-                         'border-straw text-ink-tertiary'
-              )}>
-                {done ? <CheckCircle2 size={12} /> : i + 1}
+            <div className={clsx('flex items-center gap-2 flex-shrink-0 transition-all duration-500', done || active ? 'opacity-100' : 'opacity-30')}>
+              <div className="relative flex-shrink-0">
+                <div className={clsx(
+                  'w-6 h-6 rounded-full flex items-center justify-center border text-[11px] font-bold transition-all duration-500',
+                  done   ? 'bg-sage-light border-sage text-sage-dark' :
+                  active ? 'bg-sage-light border-sage text-sage-dark' :
+                           'border-straw text-ink-tertiary'
+                )}>
+                  {done ? <CheckCircle2 size={12} /> : i + 1}
+                </div>
+                {active && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-sage animate-ping opacity-75" />
+                )}
               </div>
               <span className={clsx(
                 'text-xs font-medium whitespace-nowrap hidden sm:block',
-                active ? 'text-sage-dark' : done ? 'text-ink-secondary' : 'text-ink-tertiary'
+                active ? 'text-sage-dark' : done ? 'text-ink-tertiary' : 'text-ink-tertiary'
               )}>
                 {step.label}
               </span>
             </div>
             {i < steps.length - 1 && (
-              <div className={clsx(
-                'flex-1 h-px mx-3 transition-all duration-700',
-                done ? 'bg-sage/40' : 'bg-straw'
-              )} />
+              <div className={clsx('flex-1 h-px mx-3 transition-all duration-700', done ? 'bg-sage/40' : 'bg-straw')} />
             )}
           </div>
         )
@@ -123,29 +158,26 @@ function StageBar({ current }: { current: Stage }) {
   )
 }
 
-// ── VoteBar extended — handles "your own idea" blocking ───────────────────────
+// ── Direction card ─────────────────────────────────────────────────────────────
 
 function DirectionCard({
-  submission,
-  totalVotes,
-  isWinning,
-  isOwn,
-  hasVoted,
-  votedFor,
-  onVote,
-  index,
+  sub, totalVotes, rank, isOwn, hasVoted, votedFor, canVote, onVote, index, useRunoffVotes,
 }: {
-  submission: DemoSubmission
+  sub: Submission
   totalVotes: number
-  isWinning: boolean
+  rank: number
   isOwn: boolean
   hasVoted: boolean
   votedFor: string | null
+  canVote: boolean
   onVote: (id: string) => void
   index: number
+  useRunoffVotes: boolean
 }) {
-  const percentage = totalVotes > 0 ? (submission.voteCount / totalVotes) * 100 : 0
-  const isVotedFor = votedFor === submission.id
+  const votes      = useRunoffVotes ? sub.runoffVoteCount : sub.voteCount
+  const pct        = totalVotes > 0 ? (votes / totalVotes) * 100 : 0
+  const isVotedFor = votedFor === sub.id
+  const isLeading  = rank === 0 && totalVotes > 0
 
   return (
     <motion.div
@@ -153,93 +185,74 @@ function DirectionCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay: index * 0.07 }}
       className={clsx(
-        'rounded-[8px] border p-5 transition-all duration-300',
-        isOwn        ? 'border-straw bg-parchment/3' :
-        isWinning    ? 'border-sage/40 bg-sage-light/5'            :
-        isVotedFor   ? 'border-straw bg-parchment/5'  :
+        'rounded-xl border p-5 transition-all duration-300',
+        isOwn        ? 'border-straw bg-parchment' :
+        isLeading && hasVoted ? 'border-sage bg-sage-light/40' :
+        isVotedFor   ? 'border-straw bg-parchment' :
                        'border-straw bg-paper'
       )}
     >
-      {/* Header */}
       <div className="flex items-start justify-between mb-3 gap-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-mono text-ink-tertiary">
-            #{String(index + 1).padStart(2, '0')}
+          <span className="text-xs font-mono text-ink-tertiary">#{String(index + 1).padStart(2, '0')}</span>
+          <span className="text-xs text-ink-tertiary">
+            by <span className="text-ink-secondary font-medium">{sub.contributorHandle}</span>
           </span>
-          <span className="text-xs text-ink-secondary">
-            by <span className="text-ink font-medium">{submission.contributorHandle}</span>
-          </span>
-
-          {/* Badges */}
           {isOwn && (
-            <span className="text-xs bg-parchment/10 text-ink-secondary border border-straw rounded-[8px] px-2 py-0.5 font-medium flex items-center gap-1">
+            <span className="text-xs bg-straw text-ink-tertiary border border-straw rounded-full px-2 py-0.5 flex items-center gap-1">
               <Ban size={9} /> Your idea
             </span>
           )}
-          {isWinning && !isOwn && hasVoted && (
-            <span className="text-xs bg-sage-light/20 text-sage-dark border border-sage/30 rounded-[8px] px-2 py-0.5 font-medium animate-pulse">
-              Winner
+          {isLeading && hasVoted && !isOwn && (
+            <span className="text-xs bg-sage-light text-sage-dark border border-sage/50 rounded-full px-2 py-0.5 font-medium">
+              <Trophy size={9} className="inline mr-1" />Winner
             </span>
           )}
-          {isWinning && !isOwn && !hasVoted && (
-            <span className="text-xs bg-sage-light/15 text-sage-dark border border-sage/25 rounded-[8px] px-2 py-0.5 font-medium">
+          {isLeading && canVote && !hasVoted && !isOwn && (
+            <span className="text-xs bg-sage-light text-sage-dark border border-sage/40 rounded-full px-2 py-0.5 font-medium">
               Leading
             </span>
           )}
         </div>
-
-        {/* Vote count — only visible once voting starts */}
-        {(hasVoted || submission.voteCount > 0) && (
+        {hasVoted && (
           <div className="text-right flex-shrink-0">
-            <span className={clsx(
-              'text-base font-semibold font-mono tabular-nums',
-              isWinning && !isOwn ? 'text-sage-dark' : 'text-ink-secondary'
-            )}>
-              {submission.voteCount.toLocaleString()}
+            <span className={clsx('text-base font-semibold font-mono tabular-nums', isLeading && !isOwn ? 'text-sage-dark' : 'text-ink-secondary')}>
+              {votes.toLocaleString()}
             </span>
             <span className="text-xs text-ink-tertiary ml-1">votes</span>
           </div>
         )}
       </div>
 
-      {/* Direction text */}
-      <p className="text-ink-secondary leading-6 text-[15px] mb-4">{submission.content}</p>
+      <p className="text-ink-secondary leading-6 text-[15px] mb-4">{sub.content}</p>
 
-      {/* Vote bar — shown after user has voted */}
       {hasVoted && (
         <div className="mb-4">
           <div className="flex justify-between text-xs text-ink-tertiary mb-1.5">
-            <span>{percentage.toFixed(1)}%</span>
-            <span className="font-mono">{submission.voteCount} / {totalVotes}</span>
+            <span>{pct.toFixed(1)}%</span>
+            <span className="font-mono">{votes} / {totalVotes}</span>
           </div>
-          <div className="h-1.5 bg-parchment/8 rounded-full overflow-hidden">
+          <div className="h-1.5 bg-straw rounded-full overflow-hidden">
             <motion.div
-              className={clsx(
-                'h-full rounded-full',
-                isWinning && !isOwn
-                  ? 'bg-sage'
-                  : 'bg-ink-tertiary/30'
-              )}
+              className={clsx('h-full rounded-full', isLeading && !isOwn ? 'bg-gradient-to-r from-sage to-sage-dark' : 'bg-gradient-to-r from-straw to-ink-tertiary/40')}
               initial={{ width: 0 }}
-              animate={{ width: `${percentage}%` }}
+              animate={{ width: `${pct}%` }}
               transition={{ duration: 1, delay: index * 0.08 + 0.2, ease: 'easeOut' }}
             />
           </div>
         </div>
       )}
 
-      {/* Vote button area */}
-      {!hasVoted && (
+      {canVote && !hasVoted && (
         isOwn ? (
-          <div className="w-full h-9 rounded-[8px] border border-straw text-ink-tertiary text-xs text-center flex items-center justify-center gap-1.5">
-            <Ban size={10} />
-            Can't vote for your own idea
+          <div className="w-full h-9 rounded-full border border-straw text-ink-tertiary text-xs text-center flex items-center justify-center gap-1.5">
+            <Ban size={10} /> Can't vote for your own idea
           </div>
         ) : (
           <div>
             <button
-              onClick={() => onVote(submission.id)}
-              className="w-full h-9 rounded-[8px] border border-sage/35 text-sage-dark text-sm font-medium hover:bg-sage-light/10 hover:border-sage/60 transition-all duration-200 active:scale-[0.98]"
+              onClick={() => onVote(sub.id)}
+              className="w-full h-9 rounded-full border border-sage/60 text-sage-dark text-sm font-medium hover:bg-sage-light/60 hover:border-sage transition-all duration-200 active:scale-[0.98]"
             >
               Vote for this direction
             </button>
@@ -249,7 +262,7 @@ function DirectionCard({
       )}
 
       {isVotedFor && (
-        <div className="w-full h-9 rounded-[8px] border border-straw text-ink-tertiary text-xs text-center flex items-center justify-center gap-1.5">
+        <div className="w-full h-9 rounded-full border border-straw text-ink-tertiary text-xs text-center flex items-center justify-center gap-1.5">
           <CheckCircle2 size={11} /> Voted · 0.025 SOL paid
         </div>
       )}
@@ -257,762 +270,778 @@ function DirectionCard({
   )
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Main ───────────────────────────────────────────────────────────────────────
 
 export default function RoundView() {
-  const { roundIndex } = useParams()
-  const wallet = useWallet()
+  const { pieceId, roundIndex: roundIndexParam } = useParams()
+  const roundIndex = Number(roundIndexParam ?? 0)
+  const navigate   = useNavigate()
+  const wallet     = useWallet()
   const { publicKey } = wallet
   const { connection } = useConnection()
-  // Creators cannot vote — this route is already blocked in App.tsx for creators
-  // but guard here too in case of direct URL access
   const { role } = useRole()
 
-  const [stage, setStage] = useState<Stage>('stage1')
+  if (role === 'creator') return <Navigate to="/dashboard" replace />
 
-  // Stage 1
-  const [draft, setDraft] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [mySubmissionId, setMySubmissionId] = useState<string | null>(null)
-  const [pool, setPool] = useState([...DEMO_STAGE1_POOL])
+  const isDemo = !pieceId || pieceId.startsWith('demo-')
 
-  // Stage 2
-  const [totalVotes, setTotalVotes] = useState(DEMO_ACTIVE_ROUND.totalVotes)
-  const [votedFor, setVotedFor] = useState<string | null>(null)
-  const [voteReaction, setVoteReaction] = useState<string | null>(null)
+  // ── Remote data ────────────────────────────────────────────────────────────
+  const [loading, setLoading]                     = useState(true)
+  const [pieceTitle, setPieceTitle]               = useState('')
+  const [paragraphs, setParagraphs]               = useState<{ content: string; index: number }[]>([])
+  const [roundStatus, setRoundStatus]             = useState<RoundStatus>('Submissions')
+  const [pool, setPool]                           = useState<Submission[]>([])
+  const [totalVotes, setTotalVotes]               = useState(0)
+  const [totalRunoffVotes, setTotalRunoffVotes]   = useState(0)
+  const [submissionDeadline, setSubmissionDeadline] = useState(Date.now() + 60_000)
+  const [votingDeadline, setVotingDeadline]       = useState(Date.now() + 120_000)
+  const [runoffDeadline, setRunoffDeadline]       = useState(Date.now() + 180_000)
+  const [maxSubmissions, setMaxSubmissions]       = useState(20)
+  const [runoffPool, setRunoffPool]               = useState<string[]>([])
+
+  // ── Local interaction ──────────────────────────────────────────────────────
+  const [draft, setDraft]                         = useState('')
+  const [myDraft, setMyDraft]                     = useState('')
+  const [mySubmissionId, setMySubmissionId]       = useState<string | null>(null)
+  const [submitting, setSubmitting]               = useState(false)
+  const [votedFor, setVotedFor]                   = useState<string | null>(() =>
+    pieceId && !pieceId.startsWith('demo-') ? localStorage.getItem(`vote-${pieceId}-${roundIndex}`) : null
+  )
+  const [runoffVotedFor, setRunoffVotedFor]       = useState<string | null>(() =>
+    pieceId && !pieceId.startsWith('demo-') ? localStorage.getItem(`runoff-vote-${pieceId}-${roundIndex}`) : null
+  )
+  const [payError, setPayError]                   = useState<string | null>(null)
+  const [voteReaction, setVoteReaction]           = useState<string | null>(null)
   const [voteReactionLoading, setVoteReactionLoading] = useState(false)
-  // Voting deadline — creator can only reduce it, never force-close
-  const [votingDeadline, setVotingDeadline] = useState(DEMO_ACTIVE_ROUND.votingDeadline)
-  const [timeReducing, setTimeReducing] = useState(false)
 
-  // Generation
-  const [generatedScript, setGeneratedScript] = useState<string | null>(null)
-  const [scriptError, setScriptError] = useState(false)
-  const [sealReaction, setSealReaction] = useState<string | null>(null)
+  // ── Post-runoff AI/seal ────────────────────────────────────────────────────
+  const [uiPhase, setUiPhase]                     = useState<UiPhase>('live')
+  const [generatedScript, setGeneratedScript]     = useState<string | null>(null)
+  const [selectedDirection, setSelectedDirection] = useState<string | null>(null)
+  const [scriptError, setScriptError]             = useState(false)
+  const [sealStatus, setSealStatus]               = useState<string | null>(null)
+  const [txSig, setTxSig]                         = useState<string | null>(null)
+  const generatingRef                             = useRef(false)
 
-  // Publishing
-  const [txSig, setTxSig] = useState<string | null>(null)
-  const [publishStep, setPublishStep] = useState<string | null>(null)
+  // ── Fetch piece from backend ───────────────────────────────────────────────
+  const loadPiece = () => {
+    if (!pieceId) return
+    fetch(`${BACKEND}/api/pieces/${pieceId}`)
+      .then(r => r.json())
+      .then(data => {
+        setPieceTitle(data.title ?? '')
+        setParagraphs((data.paragraphs ?? []).map((p: any) => ({ content: p.content ?? '', index: p.index })))
+        const ar = data.activeRound
+        if (ar) {
+          setRoundStatus(ar.status)
+          setTotalVotes(ar.totalVotes ?? 0)
+          setTotalRunoffVotes(ar.totalRunoffVotes ?? 0)
+          setSubmissionDeadline(ar.submissionDeadline)
+          setVotingDeadline(ar.votingDeadline)
+          // For demo pieces in Runoff: only reset deadline when expired, never on every poll.
+          // This prevents the 2s polling loop from constantly pushing out the deadline.
+          if (isDemo && ar.status === 'Runoff') {
+            setRunoffDeadline(prev => {
+              if (prev > Date.now()) return prev  // timer still running — keep it
+              const dl = ar.runoffDeadline ?? 0
+              return dl > Date.now() ? dl : Date.now() + 30_000
+            })
+          } else {
+            setRunoffDeadline(ar.runoffDeadline ?? Date.now() + 30_000)
+          }
+          setMaxSubmissions(ar.maxSubmissions ?? 20)
+          setRunoffPool(ar.runoffPool ?? [])
 
-  // Payment errors
-  const [payError, setPayError] = useState<string | null>(null)
+          const subs: Submission[] = (ar.submissions ?? []).map((s: any) => ({
+            id: s.id,
+            content: s.content,
+            contributor: s.contributor ?? 'anon',
+            contributorHandle: s.contributor ? `@${s.contributor.slice(0, 6)}…` : '@anon',
+            voteCount: s.voteCount ?? 0,
+            runoffVoteCount: s.runoffVoteCount ?? 0,
+            inRunoff: s.inRunoff ?? false,
+          }))
+          setPool(subs)
 
-  // Hard guard — creators cannot access voting rounds
-  if (role === 'creator') {
-    return <Navigate to="/dashboard" replace />
+          if (publicKey) {
+            const mine = subs.find(s => s.contributor === publicKey.toString())
+            if (mine) { setMySubmissionId(mine.id); setMyDraft(mine.content) }
+          }
+
+          // Transitions are handled server-side via maybeAdvanceRound in getPiece.
+        }
+      })
+      .catch(err => console.warn('[RoundView] fetch error:', err.message))
+      .finally(() => setLoading(false))
   }
 
-  const wordCount = draft.trim().split(/\s+/).filter(Boolean).length
-  const MAX_WORDS = 50
+  // Initial load
+  useEffect(() => { loadPiece() }, [pieceId, publicKey])
 
-  const sortedPool = [...pool].sort((a, b) => b.voteCount - a.voteCount)
-  const winningSubmission = sortedPool[0]
-
-  // Auto-resolve voting when the deadline passes — creator cannot force-close, only reduce time
+  // Poll every 2s so status transitions driven by the backend are reflected immediately
   useEffect(() => {
-    if (stage !== 'stage2') return
-    const remaining = votingDeadline - Date.now()
-    if (remaining <= 0) {
-      handleGenerateScript()
+    if (!pieceId || uiPhase !== 'live') return
+    const id = setInterval(() => loadPiece(), 2000)
+    return () => clearInterval(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pieceId, uiPhase])
+
+  // ── Demo fallback (old demo-piece-N IDs) ──────────────────────────────────
+  useEffect(() => {
+    if (!isDemo || !pieceId) return
+    fetch(`${BACKEND}/api/pieces/${pieceId}`)
+      .then(r => r.json())
+      .then(data => {
+        setPieceTitle(data.title ?? '')
+        setParagraphs((data.paragraphs ?? []).map((p: any) => ({ content: p.content ?? '', index: p.index })))
+        const ar = data.activeRound
+        if (ar) {
+          setRoundStatus(ar.status); setTotalVotes(ar.totalVotes ?? 0)
+          setTotalRunoffVotes(ar.totalRunoffVotes ?? 0)
+          setSubmissionDeadline(ar.submissionDeadline); setVotingDeadline(ar.votingDeadline)
+          // Only set runoffDeadline if we're actually in Runoff right now.
+          // If we're in Submissions/Voting, leave it 0 — loadPiece's functional
+          // update will set a fresh 30s deadline when the transition happens.
+          if (ar.status === 'Runoff') {
+            const rdl = ar.runoffDeadline ?? 0
+            setRunoffDeadline(rdl > Date.now() ? rdl : Date.now() + 30_000)
+          }
+          setMaxSubmissions(ar.maxSubmissions ?? 20); setRunoffPool(ar.runoffPool ?? [])
+          setPool((ar.submissions ?? []).map((s: any) => ({
+            id: s.id, content: s.content, contributor: s.contributor ?? 'anon',
+            contributorHandle: s.contributor ? `@${s.contributor.slice(0,6)}…` : '@anon',
+            voteCount: s.voteCount ?? 0, runoffVoteCount: s.runoffVoteCount ?? 0,
+            inRunoff: s.inRunoff ?? false,
+          })))
+        }
+      })
+      .catch(() => {
+        setPieceTitle('It Was the Night Before the Product Launch')
+        setParagraphs([{ index: 0, content: 'It was the night before the product launch and everything was about to go wrong…' }])
+        setRoundStatus('Voting')
+        setTotalVotes(408)
+        setPool([
+          { id: 'pool-7', content: 'Show the junior dev who flagged this in code review three weeks ago.', contributor: 'nR5c...6dLm', contributorHandle: '@quietengineer', voteCount: 143, runoffVoteCount: 0, inRunoff: false },
+          { id: 'pool-3', content: 'VP calls in on speakerphone. He gives them twenty minutes.', contributor: '9cYs...3vPt', contributorHandle: '@inkandcode', voteCount: 98, runoffVoteCount: 0, inRunoff: false },
+          { id: 'pool-2', content: 'Reveal it was the intern who rotated the deploy keys.', contributor: '2wXq...5mRo', contributorHandle: '@storyhunter_em', voteCount: 87, runoffVoteCount: 0, inRunoff: false },
+        ])
+        setVotingDeadline(Date.now() + 60_000)
+      })
+    setLoading(false)
+  }, [isDemo, pieceId])
+
+  // ── Trigger generation when runoff deadline passes ────────────────────────
+  useEffect(() => {
+    if (roundStatus !== 'Runoff' || uiPhase !== 'live' || runoffDeadline <= 0) return
+    const remaining = runoffDeadline - Date.now()
+    const doGenerate = () => {
+      if (generatingRef.current) return
+      generatingRef.current = true
+      handleAutoGenerate()
+    }
+    if (remaining <= 0) { doGenerate(); return }
+    const t = setTimeout(doGenerate, remaining)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roundStatus, runoffDeadline, uiPhase])
+
+  // ── Finalize: picks winner → writes scene → seals round → opens next ────────
+  const handleAutoGenerate = async () => {
+    if (!pieceId) return
+    setUiPhase('generating')
+    setScriptError(false)
+    setSelectedDirection(null)
+
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz123456789'
+    const fakeTx = Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+
+    if (isDemo) {
+      // ── Demo path: always succeeds, no Gemini wait ────────────────────────
+      const DEMO_SCRIPTS: Record<string, string> = {
+        'demo-live-2': `INT. OBSERVATORY DOME — NIGHT
+
+The ancient motor groans to life beneath Mila's feet. She grabs the railing.
+
+MILA
+(barely audible)
+It's still running.
+
+The great dome pivots on its axis — slow, deliberate, as if obeying a command left eleven years ago. Through the slit, the sky appears. Mila knows this sky. She has memorised it.
+
+What she sees is the sky of November 2013.
+
+She checks her phone. Tonight's date blinks back.
+
+The telescope still tracking. Still patient. Still waiting for whoever was supposed to be here.
+
+She steps toward the eyepiece.`,
+        'demo-live-1': `INT. OPEN-PLAN OFFICE — NIGHT
+
+Sarah's cursor blinks in the silence. Somewhere a standing fan hums.
+
+JUNIOR DEV
+(from across the room, not looking up)
+I flagged that line. Three weeks ago.
+
+Nobody moves. The timestamp on his Slack message hangs between them — 11:47 PM, "Won't fix," Sarah's own response. She can feel the room deciding whether to look at her or the floor.
+
+CEO (V.O.)
+(through speakerphone)
+Someone explain what rollback means. In English.
+
+Sarah's hand finds the keyboard. Her fingers move before she's made the decision. She already knows they're not rolling back. You can't unlaunch a launch.
+
+She starts typing anyway.`,
+      }
+
+      const script = DEMO_SCRIPTS[pieceId] ?? runoffSubs[0]?.content ?? 'Scene sealed.'
+      setSelectedDirection(runoffSubs[0]?.content ?? null)
+
+      await new Promise(r => setTimeout(r, 3200))
+      setGeneratedScript(script)
+      setUiPhase('sealing')
+      setTxSig(fakeTx)
+
+      // Fire-and-forget: seal the round on the backend so piece view shows the new paragraph
+      fetch(`${BACKEND}/api/pieces/${pieceId}/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roundIndex }),
+      }).catch(err => console.warn('[demo finalize]', err))
+
+      await new Promise(r => setTimeout(r, 1200))
+      setUiPhase('done')
       return
     }
-    const timer = setTimeout(() => {
-      handleGenerateScript()
-    }, remaining)
-    return () => clearTimeout(timer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, votingDeadline])
 
-  // Live vote simulation during Stage 2 (only for other people's submissions)
-  useEffect(() => {
-    if (stage !== 'stage2' || votedFor) return
-    const interval = setInterval(() => {
-      setPool(prev => {
-        const others = prev.filter(s => s.id !== mySubmissionId)
-        if (!others.length) return prev
-        const target = others[Math.floor(Math.random() * others.length)]
-        return prev.map(s => s.id === target.id ? { ...s, voteCount: s.voteCount + 1 } : s)
+    // ── Real piece path: call backend, wait for Gemini ────────────────────
+    try {
+      const res = await fetch(`${BACKEND}/api/pieces/${pieceId}/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roundIndex }),
       })
-      setTotalVotes(t => t + 1)
-    }, 700)
-    return () => clearInterval(interval)
-  }, [stage, votedFor, mySubmissionId])
+      const data = await res.json()
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
+      if (!res.ok) {
+        console.warn('[finalize] error:', data.error)
+        setScriptError(true)
+        setUiPhase('live')
+        generatingRef.current = false
+        return
+      }
+
+      setSelectedDirection(data.winnerContent ?? runoffSubs[0]?.content ?? null)
+      setGeneratedScript(data.geminiScript ?? data.winnerContent ?? null)
+      setUiPhase('sealing')
+      setTxSig(fakeTx)
+      await new Promise(r => setTimeout(r, 1200))
+      setUiPhase('done')
+    } catch (e) {
+      console.warn('[finalize] fetch error:', e)
+      setScriptError(true)
+      // Don't reset uiPhase to 'live' — keep 'generating' so it retries gracefully
+      // instead of firing the effect again in a tight loop
+      setUiPhase('generating')
+    }
+    // Don't clear generatingRef — once we start we commit to finishing
+  }
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleSubmitDirection = async () => {
     if (wordCount < 5 || wordCount > MAX_WORDS || submitting) return
-    setSubmitting(true)
-    setPayError(null)
-
+    setSubmitting(true); setPayError(null)
     try {
-      // Triggers Phantom popup — 0.025 SOL submission fee
       await sendSolPayment(connection, wallet, 0.025)
     } catch (err: any) {
-      setPayError(err?.message?.includes('rejected') || err?.message?.includes('cancel')
-        ? 'Transaction cancelled.'
-        : 'Transaction failed — check your SOL balance and try again.')
-      setSubmitting(false)
-      return
+      setPayError(err?.message?.includes('rejected') || err?.message?.includes('cancel') ? 'Transaction cancelled.' : 'Transaction failed — check your SOL balance.')
+      setSubmitting(false); return
     }
 
-    const newId = `my-${Date.now()}`
-    const newEntry: DemoSubmission = {
-      id: newId,
-      content: draft,
-      contributor: publicKey?.toString().slice(0, 4) + '...' + publicKey?.toString().slice(-4) || 'anon',
-      contributorHandle: '@you',
-      voteCount: 0,
-      percentage: 0,
+    if (!isDemo && pieceId) {
+      try {
+        const res = await fetch(`${BACKEND}/api/pieces/${pieceId}/submit`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: draft, contributor: publicKey?.toString() ?? 'anon', roundIndex }),
+        })
+        const sub = await res.json()
+        if (res.ok) {
+          setMySubmissionId(sub.id)
+          setPool(prev => [...prev, { id: sub.id, content: sub.content, contributor: publicKey?.toString() ?? 'anon', contributorHandle: '@you', voteCount: 0, runoffVoteCount: 0, inRunoff: false }])
+        }
+      } catch (e) { console.error('[submit]', e) }
+    } else {
+      const id = `my-${Date.now()}`
+      setMySubmissionId(id)
+      setPool(prev => [...prev, { id, content: draft, contributor: publicKey?.toString() ?? 'anon', contributorHandle: '@you', voteCount: 0, runoffVoteCount: 0, inRunoff: false }])
     }
-    setPool(prev => [...prev, newEntry])
-    setMySubmissionId(newId)
-    setSubmitting(false)
+    setMyDraft(draft); setSubmitting(false)
   }
 
-  const handleCloseSubmissions = () => {
-    // All directions go straight to vote — no shortlisting
-    setStage('stage2')
-  }
-
-  const handleVote = async (id: string) => {
-    if (id === mySubmissionId) return
+  const handleFirstVote = async (id: string) => {
+    if (votedFor) return  // already voted — submission status doesn't matter
     setPayError(null)
-
     try {
-      // Triggers Phantom popup — 0.025 SOL vote fee
       await sendSolPayment(connection, wallet, 0.025)
     } catch (err: any) {
-      setPayError(err?.message?.includes('rejected') || err?.message?.includes('cancel')
-        ? 'Transaction cancelled.'
-        : 'Transaction failed — check your SOL balance and try again.')
+      setPayError(err?.message?.includes('rejected') || err?.message?.includes('cancel') ? 'Transaction cancelled.' : 'Transaction failed — check your SOL balance.')
       return
     }
-
-    const voted = pool.find(s => s.id === id)
-    const newCount = (voted?.voteCount ?? 0) + 1
+    if (!isDemo && pieceId) {
+      try {
+        const res = await fetch(`${BACKEND}/api/pieces/${pieceId}/vote`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submissionId: id, voter: publicKey?.toString() ?? 'anon', roundIndex }),
+        })
+        const result = await res.json()
+        if (res.ok) { setPool(prev => prev.map(s => s.id === id ? { ...s, voteCount: result.newCount } : s)); setTotalVotes(result.totalVotes) }
+      } catch (e) { console.error('[vote]', e) }
+    } else {
+      setPool(prev => prev.map(s => s.id === id ? { ...s, voteCount: s.voteCount + 1 } : s))
+      setTotalVotes(t => t + 1)
+    }
     setVotedFor(id)
-    setPool(prev => prev.map(s => s.id === id ? { ...s, voteCount: newCount } : s))
-    setTotalVotes(t => t + 1)
-
+    if (pieceId && !pieceId.startsWith('demo-')) localStorage.setItem(`vote-${pieceId}-${roundIndex}`, id)
+    const voted = pool.find(s => s.id === id)
     if (voted?.content) {
       setVoteReactionLoading(true)
-      apiVoteReaction(voted.content, newCount)
-        .then(r => setVoteReaction(r))
-        .catch(() => {})
-        .finally(() => setVoteReactionLoading(false))
+      apiVoteReaction(voted.content, totalVotes).then(r => setVoteReaction(r)).catch(() => {}).finally(() => setVoteReactionLoading(false))
     }
   }
 
-  const handleGenerateScript = async () => {
-    setStage('generating')
-    setScriptError(false)
-    const storyContext = DEMO_PARAGRAPHS.map(p => p.content).join('\n\n')
+  const handleRunoffVote = async (id: string) => {
+    if (runoffVotedFor) return  // already voted — submission status doesn't matter
+    setPayError(null)
     try {
-      const script = await apiGenerateScript(
-        winningSubmission.content,
-        storyContext,
-        DEMO_PIECE.title
-      )
-      setGeneratedScript(script)
-      setStage('review')
-    } catch {
-      setScriptError(true)
-      setStage('review')
+      await sendSolPayment(connection, wallet, 0.025)
+    } catch (err: any) {
+      setPayError(err?.message?.includes('rejected') || err?.message?.includes('cancel') ? 'Transaction cancelled.' : 'Transaction failed — check your SOL balance.')
+      return
     }
+    if (!isDemo && pieceId) {
+      try {
+        const res = await fetch(`${BACKEND}/api/pieces/${pieceId}/vote-runoff`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submissionId: id, voter: publicKey?.toString() ?? 'anon', roundIndex }),
+        })
+        const result = await res.json()
+        if (res.ok) { setPool(prev => prev.map(s => s.id === id ? { ...s, runoffVoteCount: result.newCount } : s)); setTotalRunoffVotes(result.totalRunoffVotes) }
+      } catch (e) { console.error('[runoff-vote]', e) }
+    } else {
+      setPool(prev => prev.map(s => s.id === id ? { ...s, runoffVoteCount: s.runoffVoteCount + 1 } : s))
+      setTotalRunoffVotes(t => t + 1)
+    }
+    setRunoffVotedFor(id)
+    if (pieceId && !pieceId.startsWith('demo-')) localStorage.setItem(`runoff-vote-${pieceId}-${roundIndex}`, id)
   }
 
-  const PUBLISH_STEPS = [
-    'Hashing script content (SHA-256)…',
-    'Uploading to Arweave permanent storage…',
-    'Building Solana transaction…',
-    'Broadcasting to Solana devnet…',
-    'Confirming block…',
-  ]
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const wordCount     = draft.trim().split(/\s+/).filter(Boolean).length
+  const MAX_WORDS     = 50
+  const hasSubmitted  = !!mySubmissionId
+  const hasVoted      = !!votedFor
+  const hasRunoffVoted = !!runoffVotedFor
+  const canFirstVote  = roundStatus === 'Voting' && !hasVoted
+  const canRunoffVote = roundStatus === 'Runoff' && !hasRunoffVoted
 
-  const handlePublish = async () => {
-    setStage('publishing')
-    for (const step of PUBLISH_STEPS) {
-      setPublishStep(step)
-      await new Promise(r => setTimeout(r, 700 + Math.random() * 600))
-    }
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz123456789'
-    setTxSig(Array.from({ length: 88 }, () => chars[Math.floor(Math.random() * chars.length)]).join(''))
-    setPublishStep(null)
-    setStage('published')
+  const firstRoundSorted = [...pool].sort((a, b) => b.voteCount - a.voteCount)
+  const runoffSubs       = pool.filter(s => runoffPool.includes(s.id)).sort((a, b) => b.runoffVoteCount - a.runoffVoteCount)
+  const lastParagraph    = paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : null
 
-    if (generatedScript) {
-      apiSealReaction(generatedScript, DEMO_PIECE.title)
-        .then(r => setSealReaction(r))
-        .catch(() => {})
-    }
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <main className="min-h-screen pt-28 pb-24 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-ink-tertiary">
+          <Loader2 size={20} className="animate-spin" />
+          <p className="text-sm">Loading round…</p>
+        </div>
+      </main>
+    )
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
-    <main className="min-h-screen pt-28 pb-24 px-6">
-      <div className="max-w-5xl mx-auto">
+    <main className="min-h-screen pt-28 pb-24 px-6 relative">
+      <DotPattern />
+      <div className="max-w-5xl mx-auto relative z-10">
 
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-          <div className="text-xs text-ink-secondary uppercase tracking-[0.08em] mb-2">{DEMO_PIECE.title}</div>
+          {pieceTitle && <div className="text-xs text-ink-tertiary uppercase tracking-widest mb-2">{pieceTitle}</div>}
           <div className="flex items-start justify-between gap-6 flex-wrap">
             <div>
-              <h1 className="font-mono font-bold text-3xl text-ink mb-1">
-                Round {Number(roundIndex ?? 3) + 1}
-              </h1>
-              <p className="text-ink-secondary text-sm">
-                {stage === 'stage1'     && `${pool.length} directions submitted · submissions open`}
-                {stage === 'stage2'     && `${pool.length} directions · ${totalVotes.toLocaleString()} votes cast · 1 vote per person`}
-                {stage === 'generating' && 'Gemini writing the official scene…'}
-                {stage === 'review'     && 'Script ready — creator review'}
-                {stage === 'publishing' && 'Broadcasting to Solana devnet…'}
-                {stage === 'published'  && 'Scene sealed on Solana devnet'}
+              <p className="text-xs text-ink-tertiary uppercase tracking-widest mb-1">Round {roundIndex + 1} of 8</p>
+              <h1 className="font-serif text-3xl text-ink mb-1">{getRoundLabel(roundIndex)}</h1>
+              <p className="text-ink-tertiary text-sm">
+                {uiPhase === 'generating' && 'Gemini writing the official scene…'}
+                {uiPhase === 'sealing'    && 'Sealing to Solana devnet…'}
+                {uiPhase === 'done'       && 'Scene sealed — next round opening…'}
+                {uiPhase === 'live' && roundStatus === 'Submissions' && `${pool.length} directions submitted · submissions open`}
+                {uiPhase === 'live' && roundStatus === 'Voting'      && `${pool.length} directions · ${totalVotes.toLocaleString()} votes cast`}
+                {uiPhase === 'live' && roundStatus === 'Runoff'      && `Top ${runoffSubs.length} finalists · ${totalRunoffVotes.toLocaleString()} runoff votes`}
               </p>
             </div>
-            {stage === 'stage2' && !votedFor && (
+            {uiPhase === 'live' && roundStatus === 'Submissions' && (
+              <RoundTimer deadline={submissionDeadline} label="Submissions close" className="flex-shrink-0" />
+            )}
+            {uiPhase === 'live' && roundStatus === 'Voting' && (
               <RoundTimer deadline={votingDeadline} label="Voting closes" className="flex-shrink-0" />
+            )}
+            {uiPhase === 'live' && roundStatus === 'Runoff' && (
+              <RoundTimer deadline={runoffDeadline} label="Runoff closes" className="flex-shrink-0" />
             )}
           </div>
         </motion.div>
 
-        <StageBar current={stage} />
+        <StageBar roundStatus={uiPhase === 'live' ? roundStatus : 'Runoff'} uiPhase={uiPhase} />
 
-        {/* Story context strip */}
-        {stage !== 'published' && (
-          <div className="mb-8 p-5 rounded-[8px] bg-parchment/3 border border-straw">
-            <div className="text-xs uppercase tracking-[0.08em] text-ink-tertiary mb-2">
-              Story so far — Paragraph {DEMO_PARAGRAPHS.length - 1}
+        {/* Story so far */}
+        {uiPhase !== 'done' && lastParagraph && (
+          <div className="mb-8 p-5 rounded-xl bg-parchment border border-straw">
+            <div className="text-xs uppercase tracking-widest text-ink-tertiary mb-2">
+              {lastParagraph.index === 0 ? "Opening \u2014 creator\u2019s premise" : `Story so far \u2014 Part ${lastParagraph.index}`}
             </div>
-            <p className="font-serif text-ink-secondary leading-7 text-[15px] line-clamp-3">
-              {DEMO_PARAGRAPHS[DEMO_PARAGRAPHS.length - 1].content}
-            </p>
-            <div className="flex items-center gap-2 mt-2 text-xs text-ink-tertiary">
-              <Lock size={10} />
-              <span>sealed on Solana</span>
-            </div>
+            <p className="font-serif text-ink-secondary leading-7 text-[15px] line-clamp-4">{lastParagraph.content}</p>
+            <div className="flex items-center gap-2 mt-2 text-xs text-ink-tertiary"><Lock size={10} /><span>sealed on Solana</span></div>
           </div>
         )}
 
         <AnimatePresence mode="wait">
 
-          {/* ════════════════════════════════════════════
-              STAGE 1 — Submit a direction
-          ════════════════════════════════════════════ */}
-          {stage === 'stage1' && (
-            <motion.div
-              key="stage1"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-            >
+          {/* ── SUBMISSIONS: form ── */}
+          {uiPhase === 'live' && roundStatus === 'Submissions' && !hasSubmitted && (
+            <motion.div key="form" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
+              <CountdownBanner deadline={submissionDeadline} label="Submissions close in" />
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-
-                {/* Left: submission form */}
                 <div className="lg:col-span-3">
-                  <div className="p-6 rounded-[8px] border border-straw bg-paper">
-                    {mySubmissionId ? (
-                      // ── Already submitted ──
-                      <motion.div
-                        initial={{ scale: 0.95, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="text-center py-10"
-                      >
-                        <div className="w-14 h-14 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto mb-4">
-                          <CheckCircle2 size={24} className="text-emerald-600" />
-                        </div>
-                        <h3 className="font-mono font-bold text-xl text-ink mb-2">Direction submitted</h3>
-                        <p className="text-ink-secondary text-sm mb-5 max-w-xs mx-auto">
-                          0.025 SOL paid · your direction is on-chain. Once submissions close,
-                          you'll vote for someone else's idea (0.025 SOL) — not your own.
-                        </p>
-                        {/* Show their submitted direction */}
-                        <div className="p-4 rounded-[8px] bg-parchment/5 border border-straw text-left">
-                          <div className="text-xs text-ink-tertiary mb-1.5 uppercase tracking-[0.08em]">Your direction</div>
-                          <p className="text-ink-secondary text-sm italic leading-6">"{draft}"</p>
-                        </div>
-                      </motion.div>
-                    ) : !publicKey ? (
+                  <div className="p-6 rounded-2xl border border-straw bg-paper">
+                    {!publicKey ? (
                       <div className="text-center py-10">
-                        <p className="text-ink-secondary text-sm mb-4 font-serif">
-                          Connect Phantom or Solflare to participate
-                        </p>
+                        <p className="text-ink-tertiary text-sm mb-4 font-serif">Connect your wallet to participate</p>
                         <WalletMultiButton />
                       </div>
                     ) : (
                       <>
-                        <h2 className="font-mono font-bold text-xl text-ink mb-1">Submit your direction</h2>
-                        <p className="text-ink-secondary text-sm mb-5">
-                          In plain language, tell the community where the story should go next.
-                          Max {MAX_WORDS} words. You'll get <strong className="text-ink">one vote</strong> to cast on
-                          someone else's direction — not your own.
+                        <h2 className="font-serif text-xl text-ink mb-1">Submit your direction</h2>
+                        <p className="text-ink-tertiary text-sm mb-5">
+                          Where should the story go next? Max {MAX_WORDS} words.
+                          Top 5 go to a runoff vote, then the winner becomes the next scene.
                         </p>
-
                         <textarea
                           value={draft}
                           onChange={e => setDraft(e.target.value)}
-                          placeholder="e.g. Show the junior dev who flagged this bug three weeks ago. His code review comment was dismissed as out of scope. He's still in the room. He hasn't said a word."
+                          placeholder="e.g. Show the junior dev who flagged this bug three weeks ago. He hasn't said a word."
                           rows={5}
-                          className="w-full bg-paper border border-straw rounded-[8px] p-4 text-ink text-base leading-7 placeholder:text-ink-tertiary focus:outline-none focus:border-sage/40 resize-none transition-colors mb-3"
+                          className="w-full bg-paper border border-straw rounded-xl p-4 text-ink text-base leading-7 placeholder:text-ink-tertiary focus:outline-none focus:border-sage resize-none transition-colors mb-3"
                         />
-
                         <div className="flex items-center justify-between mb-5">
-                          <span className={clsx(
-                            'text-xs font-mono tabular-nums',
-                            wordCount > MAX_WORDS ? 'text-red-600' : wordCount >= 5 ? 'text-emerald-600' : 'text-ink-tertiary'
-                          )}>
+                          <span className={clsx('text-xs font-mono tabular-nums', wordCount > MAX_WORDS ? 'text-red-400' : wordCount >= 5 ? 'text-green-400' : 'text-ink-tertiary')}>
                             {wordCount} / {MAX_WORDS} words
                           </span>
-                          <span className="text-xs text-ink-tertiary">
-                            Hash → Solana · Gemini writes the winning scene
-                          </span>
+                          <span className="text-xs text-ink-tertiary">Top 5 → runoff vote → Gemini writes the scene</span>
                         </div>
-
                         {wordCount > MAX_WORDS && (
-                          <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 mb-4 text-xs text-red-600">
-                            <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
-                            Over {MAX_WORDS} words — keep it concise.
+                          <div className="flex items-start gap-2 p-3 rounded-lg bg-red-400/5 border border-red-400/15 mb-4 text-xs text-red-400/80">
+                            <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />Over {MAX_WORDS} words — keep it concise.
                           </div>
                         )}
-
                         {payError && (
-                          <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 mb-4 text-xs text-red-600">
-                            <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
-                            {payError}
+                          <div className="flex items-start gap-2 p-3 rounded-lg bg-red-400/5 border border-red-400/15 mb-4 text-xs text-red-400/80">
+                            <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />{payError}
                           </div>
                         )}
-
-                        <div>
-                          <motion.button
-                            onClick={handleSubmitDirection}
-                            disabled={wordCount < 5 || wordCount > MAX_WORDS || submitting}
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.99 }}
-                            className={clsx(
-                              'w-full flex items-center justify-center gap-2 h-11 rounded-[8px] font-medium text-sm transition-all',
-                              wordCount >= 5 && wordCount <= MAX_WORDS
-                                ? 'bg-sage text-white hover:bg-sage-dark'
-                                : 'bg-parchment/6 text-ink-tertiary cursor-not-allowed'
-                            )}
-                          >
-                            {submitting ? (
-                              <>
-                                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Signing…
-                              </>
-                            ) : (
-                              <>
-                                <Send size={13} />
-                                Submit Direction
-                              </>
-                            )}
-                          </motion.button>
-                          {!submitting && wordCount >= 5 && wordCount <= MAX_WORDS && (
-                            <p className="text-center text-xs text-ink-tertiary mt-2">0.025 SOL + gas fee</p>
-                          )}
-                        </div>
+                        <motion.button
+                          onClick={handleSubmitDirection}
+                          disabled={wordCount < 5 || wordCount > MAX_WORDS || submitting}
+                          whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}
+                          className={clsx('w-full flex items-center justify-center gap-2 h-11 rounded-full font-medium text-sm transition-all',
+                            wordCount >= 5 && wordCount <= MAX_WORDS ? 'bg-sage text-white hover:brightness-110' : 'bg-straw text-ink-tertiary cursor-not-allowed')}
+                        >
+                          {submitting ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Signing…</> : <><Send size={13} />Submit Direction</>}
+                        </motion.button>
+                        {!submitting && wordCount >= 5 && wordCount <= MAX_WORDS && (
+                          <p className="text-center text-xs text-ink-tertiary mt-2">0.025 SOL + gas fee</p>
+                        )}
                       </>
                     )}
                   </div>
                 </div>
-
-                {/* Right: pool info + creator close button */}
                 <div className="lg:col-span-2 space-y-4">
-                  {/* Counter */}
-                  <div className="p-5 rounded-[8px] border border-straw bg-paper">
-                    <div className="text-xs uppercase tracking-[0.08em] text-ink-tertiary mb-2">Submissions</div>
+                  <div className="p-5 rounded-2xl border border-straw bg-paper">
+                    <div className="text-xs uppercase tracking-widest text-ink-tertiary mb-2">Submissions</div>
                     <div className="flex items-end gap-2 mb-1">
                       <span className="text-4xl font-mono font-bold text-ink">{pool.length}</span>
-                      <span className="text-ink-tertiary text-sm mb-1">/ {DEMO_ACTIVE_ROUND.maxSubmissions} max</span>
+                      <span className="text-ink-tertiary text-sm mb-1">/ {maxSubmissions} max</span>
                     </div>
-                    <div className="h-1.5 bg-parchment/8 rounded-full overflow-hidden mt-2">
-                      <motion.div
-                        className="h-full bg-sage rounded-full"
-                        animate={{ width: `${Math.min((pool.length / DEMO_ACTIVE_ROUND.maxSubmissions) * 100, 100)}%` }}
-                        transition={{ duration: 0.6 }}
-                      />
+                    <div className="h-1.5 bg-straw rounded-full overflow-hidden mt-2">
+                      <motion.div className="h-full bg-gradient-to-r from-sage/60 to-sage rounded-full" animate={{ width: `${Math.min((pool.length / maxSubmissions) * 100, 100)}%` }} transition={{ duration: 0.6 }} />
                     </div>
                   </div>
-
-                  {/* Rule callout */}
-                  <div className="p-4 rounded-[8px] border border-straw bg-parchment/3 space-y-2">
-                    <div className="text-xs uppercase tracking-[0.08em] text-ink-tertiary mb-2">How it works</div>
+                  <div className="p-4 rounded-xl border border-straw bg-parchment space-y-2">
+                    <div className="text-xs uppercase tracking-widest text-ink-tertiary mb-2">How it works</div>
                     {[
-                      'Submit your direction · 0.025 SOL + gas',
-                      'Submissions close → all directions go to vote',
-                      'You get 1 vote (0.025 SOL) — for someone else\'s idea only',
-                      'Winner → Gemini writes the full scene',
-                      'Creator publishes to Solana devnet',
+                      'Submit direction · 0.025 SOL',
+                      'All directions go to first vote',
+                      'Top 5 advance to runoff · 0.025 SOL',
+                      'Runoff winner → Gemini writes scene',
+                      'Scene auto-seals & next round opens',
                     ].map((rule, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-ink-secondary">
-                        <span className="text-sage font-mono mt-0.5 flex-shrink-0">{i + 1}.</span>
+                      <div key={i} className="flex items-start gap-2 text-xs text-ink-tertiary">
+                        <span className="text-sage-dark font-mono mt-0.5 flex-shrink-0">{i + 1}.</span>
                         {rule}
                       </div>
                     ))}
                   </div>
-
-                  {/* Submission info — no creator close */}
-                  <div className="p-4 rounded-[8px] border border-straw bg-parchment/[0.02] text-center">
-                    <div className="flex items-center justify-center gap-1.5 mb-1">
-                      <Lock size={11} className="text-ink-tertiary" />
-                      <p className="text-xs text-ink-tertiary">Submissions close automatically</p>
-                    </div>
-                    <p className="text-xs text-ink-tertiary leading-5">
-                      The window is set on-chain. Once it closes, voting opens for everyone.
-                    </p>
-                  </div>
                 </div>
               </div>
             </motion.div>
           )}
 
-          {/* ════════════════════════════════════════════
-              STAGE 2 — Community votes (no own-idea voting)
-          ════════════════════════════════════════════ */}
-          {stage === 'stage2' && (
-            <motion.div
-              key="stage2"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-            >
-              {/* Rule banner */}
-              <div className={clsx(
-                'flex items-start gap-3 p-4 rounded-[8px] border mb-6 transition-all',
-                votedFor
-                  ? 'border-emerald-200 bg-emerald-50'
-                  : 'border-sage/20 bg-sage-light/5'
-              )}>
-                {votedFor
-                  ? <CheckCircle2 size={15} className="text-emerald-600 mt-0.5 flex-shrink-0" />
-                  : <Users size={15} className="text-sage-dark mt-0.5 flex-shrink-0" />
-                }
+          {/* ── SUBMISSIONS: pool preview (submitted, waiting) ── */}
+          {uiPhase === 'live' && roundStatus === 'Submissions' && hasSubmitted && (
+            <motion.div key="submitted-wait" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
+              <CountdownBanner deadline={submissionDeadline} label="Voting opens in" />
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-green-400/20 bg-green-400/5 mb-6">
+                <CheckCircle2 size={15} className="text-green-400 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className={clsx('text-sm font-medium', votedFor ? 'text-emerald-600' : 'text-sage-dark')}>
-                    {votedFor ? 'Vote cast' : 'You have 1 vote — cast it for someone else\'s idea'}
-                  </p>
-                  <p className="text-ink-secondary text-xs mt-0.5">
-                    {votedFor
-                      ? `You voted. ${totalVotes.toLocaleString()} votes total.`
-                      : `${pool.length} directions competing · you cannot vote for your own`
-                    }
-                  </p>
+                  <p className="text-sm font-medium text-green-400">Direction submitted</p>
+                  <p className="text-ink-tertiary text-xs mt-0.5">0.025 SOL paid. Voting opens when submissions close — you'll vote for someone else's idea in the first round, then top 5 go to a runoff.</p>
+                  {myDraft && <p className="text-ink-tertiary text-xs mt-2 italic">"{myDraft.slice(0, 100)}{myDraft.length > 100 ? '…' : ''}"</p>}
                 </div>
               </div>
-
-              {/* Payment error */}
-              {payError && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 mb-5 text-xs text-red-600">
-                  <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
-                  {payError}
-                </div>
-              )}
-
-              {/* Direction cards */}
-              <div className="space-y-4 mb-8">
-                {sortedPool.map((sub, i) => (
-                  <DirectionCard
-                    key={sub.id}
-                    submission={sub}
-                    totalVotes={totalVotes}
-                    isWinning={i === 0}
-                    isOwn={sub.id === mySubmissionId}
-                    hasVoted={!!votedFor}
-                    votedFor={votedFor}
-                    onVote={handleVote}
-                    index={i}
-                  />
+              <div className="flex items-center gap-2 text-xs text-ink-tertiary mb-5"><Clock size={11} /><span>Waiting for submissions to close — voting opens automatically</span></div>
+              <div className="space-y-4">
+                {pool.map((sub, i) => (
+                  <DirectionCard key={sub.id} sub={sub} totalVotes={0} rank={i} isOwn={sub.id === mySubmissionId} hasVoted={false} votedFor={null} canVote={false} onVote={() => {}} index={i} useRunoffVotes={false} />
                 ))}
               </div>
+            </motion.div>
+          )}
 
-              {/* Gemini vote reaction */}
+          {/* ── FIRST VOTE ── */}
+          {uiPhase === 'live' && roundStatus === 'Voting' && (
+            <motion.div key="voting" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
+              <CountdownBanner deadline={votingDeadline} label="Runoff opens in" color="amber" />
+              <div className={clsx('flex items-start gap-3 p-4 rounded-xl border mb-6', hasVoted ? 'border-green-400/20 bg-green-400/5' : 'border-sage/30 bg-sage-light/40')}>
+                {hasVoted ? <CheckCircle2 size={15} className="text-green-400 mt-0.5 flex-shrink-0" /> : <Users size={15} className="text-sage-dark mt-0.5 flex-shrink-0" />}
+                <div>
+                  <p className={clsx('text-sm font-medium', hasVoted ? 'text-green-400' : 'text-sage-dark')}>
+                    {hasVoted ? 'Vote cast — top 5 go to runoff' : 'First vote — pick your favourite direction'}
+                  </p>
+                  <p className="text-ink-tertiary text-xs mt-0.5">
+                    {hasVoted ? `${totalVotes.toLocaleString()} votes total · top 5 advance to a runoff vote` : `${pool.length} directions competing · 0.025 SOL · you cannot vote for your own`}
+                  </p>
+                </div>
+              </div>
+              {payError && <div className="flex items-start gap-2 p-3 rounded-lg bg-red-400/5 border border-red-400/15 mb-5 text-xs text-red-400/80"><AlertCircle size={13} className="mt-0.5 flex-shrink-0" />{payError}</div>}
+              <div className="space-y-4 mb-8">
+                {firstRoundSorted.map((sub, i) => (
+                  <DirectionCard key={sub.id} sub={sub} totalVotes={totalVotes} rank={i} isOwn={sub.id === mySubmissionId} hasVoted={hasVoted} votedFor={votedFor} canVote={canFirstVote} onVote={handleFirstVote} index={i} useRunoffVotes={false} />
+                ))}
+              </div>
               <AnimatePresence>
                 {(voteReactionLoading || voteReaction) && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="mb-6 p-4 rounded-[8px] border border-sage/20 bg-sage-light/5"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Sparkles size={12} className="text-sage-dark" />
-                      <span className="text-xs uppercase tracking-[0.08em] text-sage font-medium">Gemini reacts</span>
-                    </div>
-                    {voteReactionLoading
-                      ? <div className="flex items-center gap-2 text-ink-secondary text-sm">
-                          <div className="w-3 h-3 border border-sage/40 border-t-sage rounded-full animate-spin" />
-                          Reading the direction…
-                        </div>
-                      : <p className="text-ink-secondary text-sm leading-relaxed font-serif italic">{voteReaction}</p>
-                    }
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="mb-6 p-4 rounded-xl border border-sage/30 bg-sage-light/40">
+                    <div className="flex items-center gap-2 mb-2"><Sparkles size={12} className="text-sage-dark" /><span className="text-xs uppercase tracking-widest text-sage-dark font-medium">Gemini reacts</span></div>
+                    {voteReactionLoading ? <div className="flex items-center gap-2 text-ink-tertiary text-sm"><div className="w-3 h-3 border border-sage border-t-gold rounded-full animate-spin" />Reading…</div>
+                      : <p className="text-ink-secondary text-sm leading-relaxed font-serif italic">{voteReaction}</p>}
                   </motion.div>
                 )}
               </AnimatePresence>
-
-              {/* Creator panel — reduce time only, cannot force-close */}
-              <div className="p-5 rounded-[8px] border border-straw bg-parchment/[0.02]">
-                <div className="flex items-center gap-2 mb-1">
-                  <Lock size={12} className="text-ink-tertiary" />
-                  <p className="text-xs font-medium text-ink-secondary">Creator controls</p>
-                </div>
-                <p className="text-xs text-ink-tertiary mb-4 leading-5">
-                  Voting cannot be force-closed once live. You can only shorten the remaining time.
-                  The vote auto-resolves when the timer hits zero.
-                </p>
-
-                {winningSubmission && (
-                  <div className="mb-4 p-3 rounded-lg bg-parchment/3 border border-straw">
-                    <span className="text-xs text-ink-tertiary">Currently leading</span>
-                    <p className="text-ink-secondary text-xs mt-1 italic line-clamp-2">
-                      "{winningSubmission.content}"
-                    </p>
-                    <span className="text-xs text-ink-tertiary mt-1 block">{winningSubmission.voteCount} votes</span>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-ink-tertiary flex-shrink-0">Reduce time by:</span>
-                  {[
-                    { label: '−5 min',  ms: 5  * 60 * 1000 },
-                    { label: '−30 min', ms: 30 * 60 * 1000 },
-                    { label: '−1 hr',   ms: 60 * 60 * 1000 },
-                    { label: '−6 hr',   ms: 6  * 60 * 60 * 1000 },
-                  ].map(({ label, ms }) => (
-                    <button
-                      key={label}
-                      disabled={timeReducing}
-                      onClick={() => {
-                        setVotingDeadline(prev => Math.max(Date.now() + 60_000, prev - ms))
-                      }}
-                      className="h-7 px-3 rounded-[8px] text-xs border border-straw text-ink-secondary hover:border-sage/30 hover:text-ink transition-all"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </motion.div>
           )}
 
-          {/* ════════════════════════════════════════════
-              GENERATING
-          ════════════════════════════════════════════ */}
-          {stage === 'generating' && (
-            <motion.div
-              key="generating"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="py-16"
-            >
-              <div className="max-w-lg mx-auto text-center">
-                <div className="w-16 h-16 rounded-full bg-sage-light/10 border border-sage/30 flex items-center justify-center mx-auto mb-6">
-                  <Sparkles size={24} className="text-sage-dark animate-pulse" />
-                </div>
-                <h2 className="font-mono font-bold text-2xl text-ink mb-3">Gemini is writing the scene</h2>
-                <p className="text-ink-secondary text-sm mb-8">
-                  The community's winning direction is being turned into a professional TV drama scene.
-                </p>
-                <div className="p-4 rounded-[8px] border border-sage/20 bg-sage-light/5 mb-8 text-left">
-                  <div className="text-xs text-sage uppercase tracking-[0.08em] mb-2">Winning direction</div>
-                  <p className="text-ink-secondary text-sm italic">"{winningSubmission?.content}"</p>
-                </div>
-                <div className="space-y-2.5 text-left">
-                  {[75, 90, 65, 85, 70, 80, 60].map((w, i) => (
-                    <div key={i} className="h-3 bg-parchment/8 rounded-full animate-pulse"
-                      style={{ width: `${w}%`, animationDelay: `${i * 0.15}s` }} />
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          )}
+          {/* ── RUNOFF VOTE (top 5) ── */}
+          {uiPhase === 'live' && roundStatus === 'Runoff' && (
+            <motion.div key="runoff" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
+              <CountdownBanner deadline={runoffDeadline} label="AI writes scene in" color="amber" />
 
-          {/* ════════════════════════════════════════════
-              REVIEW — Creator approves script
-          ════════════════════════════════════════════ */}
-          {stage === 'review' && (
-            <motion.div
-              key="review"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-            >
-              <div className="mb-5 p-4 rounded-[8px] border border-sage/20 bg-sage-light/5 flex items-start gap-3">
-                <CheckCircle2 size={14} className="text-sage-dark mt-0.5 flex-shrink-0" />
-                <div>
-                  <div className="text-xs text-sage uppercase tracking-[0.08em] mb-1">Vote winner</div>
-                  <p className="text-ink-secondary text-sm italic">"{winningSubmission?.content}"</p>
-                  <p className="text-ink-tertiary text-xs mt-1">{winningSubmission?.contributorHandle} · {winningSubmission?.voteCount} votes</p>
-                </div>
-              </div>
-
-              <div className="rounded-[8px] border border-straw overflow-hidden mb-6">
-                <div className="flex items-center gap-3 px-5 py-4 bg-parchment/5 border-b border-straw">
-                  <Sparkles size={14} className="text-sage-dark" />
-                  <span className="text-sm font-medium text-ink-secondary">AI Generated Scene</span>
-                  {generatedScript && <span className="text-xs bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-[8px] px-2 py-0.5 ml-auto">Ready</span>}
-                </div>
-                <div className="p-6">
-                  {scriptError ? (
-                    <div className="text-center py-8">
-                      <p className="text-ink-secondary text-sm mb-3">Add GEMINI_API_KEY to backend/.env to enable script generation.</p>
-                      <button onClick={handleGenerateScript} className="text-sage-dark text-sm border border-sage/35 h-9 px-5 rounded-[8px] hover:bg-sage-light/10 transition-all">Retry</button>
-                    </div>
-                  ) : (
-                    <pre className="font-mono text-ink-secondary text-sm leading-7 whitespace-pre-wrap">{generatedScript}</pre>
-                  )}
-                </div>
-              </div>
-
-              {generatedScript && (
-                <>
-                  <div className="p-4 rounded-[8px] border border-straw bg-parchment/3 mb-5">
-                    <div className="flex items-center gap-2 mb-2">
-                      <FileText size={13} className="text-ink-secondary" />
-                      <span className="text-xs uppercase tracking-[0.08em] text-ink-tertiary">What gets published</span>
-                    </div>
-                    <ul className="space-y-1.5">
-                      {[
-                        'SHA-256 of this script → written to Solana devnet',
-                        'Full script → Arweave permanent storage',
-                        'Winning direction contributor → on-chain co-author credit',
-                        'Vote tally → sealed alongside the paragraph',
-                      ].map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-xs text-ink-secondary">
-                          <ChevronRight size={10} className="mt-0.5 text-sage flex-shrink-0" />
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <motion.button
-                    onClick={handlePublish}
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    className="w-full flex items-center justify-center gap-2 h-11 rounded-[8px] bg-sage text-white font-medium text-sm hover:bg-sage-dark transition-all"
-                  >
-                    <Zap size={14} />
-                    Publish to Solana Devnet
-                  </motion.button>
-                </>
-              )}
-            </motion.div>
-          )}
-
-          {/* ════════════════════════════════════════════
-              PUBLISHING
-          ════════════════════════════════════════════ */}
-          {stage === 'publishing' && (
-            <motion.div
-              key="publishing"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="py-16"
-            >
-              <div className="max-w-sm mx-auto text-center">
-                <div className="w-16 h-16 rounded-full bg-sage-light/10 border-2 border-sage/40 flex items-center justify-center mx-auto mb-6">
-                  <Zap size={24} className="text-sage-dark" />
-                </div>
-                <h2 className="font-mono font-bold text-2xl text-ink mb-8">Publishing to devnet</h2>
-                <div className="space-y-3 text-left">
-                  {PUBLISH_STEPS.map((step, i) => {
-                    const currentIdx = PUBLISH_STEPS.indexOf(publishStep ?? '')
-                    const isDone = currentIdx > i
-                    const isCurrent = currentIdx === i
-                    return (
-                      <div key={i} className={clsx(
-                        'flex items-center gap-3 text-sm transition-all duration-300',
-                        isDone ? 'text-ink-secondary' : isCurrent ? 'text-ink' : 'text-ink-tertiary'
-                      )}>
-                        {isDone
-                          ? <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" />
-                          : isCurrent
-                          ? <div className="w-3.5 h-3.5 border border-sage/60 border-t-sage-dark rounded-full animate-spin flex-shrink-0" />
-                          : <div className="w-3.5 h-3.5 rounded-full border border-straw flex-shrink-0" />
-                        }
-                        {step}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* ════════════════════════════════════════════
-              PUBLISHED
-          ════════════════════════════════════════════ */}
-          {stage === 'published' && (
-            <motion.div key="published" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-                className="text-center py-10 mb-8"
-              >
-                <div className="inline-flex w-20 h-20 rounded-full bg-sage-light/10 border-2 border-sage/40 items-center justify-center mb-4 animate-seal-stamp">
-                  <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-                    <path d="M18 4L22 14L33 15.5L25 23L27 34L18 29L9 34L11 23L3 15.5L14 14L18 4Z"
-                      fill="rgba(139,105,20,0.2)" stroke="#8B6914" strokeWidth="1.5" />
-                    <path d="M12 18L16 22L24 14" stroke="#8B6914" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                <h2 className="font-mono font-bold text-3xl text-ink mb-2">Scene published.</h2>
-                <p className="text-ink-secondary max-w-sm mx-auto text-sm">
-                  Community direction → Gemini script → Solana devnet. The winning contributor
-                  is permanently credited as co-author.
-                </p>
-                {txSig && (
-                  <div className="mt-4 px-4 py-2 rounded-lg bg-parchment/5 border border-straw inline-block">
-                    <span className="text-xs text-ink-tertiary mr-2">tx</span>
-                    <span className="text-xs font-mono text-ink-secondary">{txSig.slice(0, 20)}…{txSig.slice(-8)}</span>
-                  </div>
-                )}
-              </motion.div>
-
-              <AnimatePresence>
-                {sealReaction ? (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mb-6 p-5 rounded-[8px] border border-sage/25 bg-sage-light/5"
-                  >
-                    <div className="flex items-center gap-2 mb-3">
-                      <Sparkles size={13} className="text-sage-dark" />
-                      <span className="text-xs uppercase tracking-[0.08em] text-sage font-medium">Gemini — Editorial Note</span>
-                    </div>
-                    <p className="text-ink-secondary text-sm leading-relaxed font-serif italic">{sealReaction}</p>
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="mb-6 p-4 rounded-[8px] border border-sage/10 flex items-center gap-3"
-                  >
-                    <div className="w-4 h-4 border border-sage/40 border-t-sage-dark rounded-full animate-spin flex-shrink-0" />
-                    <span className="text-ink-tertiary text-xs">Gemini writing editorial note…</span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {generatedScript && (
+              {/* Mid-session join banner — shown to users who arrive during runoff */}
+              {!hasRunoffVoted && !mySubmissionId && (
                 <motion.div
-                  initial={{ opacity: 0, y: 8 }}
+                  initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 }}
-                  className="mb-6 p-6 rounded-[8px] border border-straw bg-parchment/3"
+                  className="flex items-start gap-3 p-4 rounded-xl border border-amber-400/25 bg-amber-400/5 mb-4"
                 >
-                  <div className="text-xs uppercase tracking-[0.08em] text-ink-tertiary mb-4 flex items-center gap-2">
-                    <Sparkles size={10} className="text-sage" />
-                    Published scene · Paragraph {DEMO_PARAGRAPHS.length}
+                  <Zap size={15} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-400">Runoff is live — cast your vote now</p>
+                    <p className="text-ink-tertiary text-xs mt-0.5">You're joining mid-round. The top {runoffSubs.length} directions are competing — vote for the one you want Gemini to write.</p>
                   </div>
-                  <pre className="font-mono text-ink-secondary text-sm leading-7 whitespace-pre-wrap">{generatedScript}</pre>
                 </motion.div>
               )}
 
-              <OnChainRecord record={DEMO_CHAIN_RECORD} />
+              <div className={clsx('flex items-start gap-3 p-4 rounded-xl border mb-6', hasRunoffVoted ? 'border-green-400/20 bg-green-400/5' : 'border-sage/30 bg-sage-light/40')}>
+                {hasRunoffVoted ? <CheckCircle2 size={15} className="text-green-400 mt-0.5 flex-shrink-0" /> : <Trophy size={15} className="text-sage-dark mt-0.5 flex-shrink-0" />}
+                <div>
+                  <p className={clsx('text-sm font-medium', hasRunoffVoted ? 'text-green-400' : 'text-sage-dark')}>
+                    {hasRunoffVoted ? 'Runoff vote cast — Gemini writes next' : `Runoff — top ${runoffSubs.length} finalists`}
+                  </p>
+                  <p className="text-ink-tertiary text-xs mt-0.5">
+                    {hasRunoffVoted ? `${totalRunoffVotes.toLocaleString()} runoff votes · winner goes to Gemini · scene auto-seals when timer ends` : `The top directions from round 1 face off · 0.025 SOL · winner becomes the next scene`}
+                  </p>
+                </div>
+              </div>
+              {payError && <div className="flex items-start gap-2 p-3 rounded-lg bg-red-400/5 border border-red-400/15 mb-5 text-xs text-red-400/80"><AlertCircle size={13} className="mt-0.5 flex-shrink-0" />{payError}</div>}
+              <div className="space-y-4 mb-8">
+                {runoffSubs.length === 0 && (
+                  <p className="text-center py-6 text-ink-tertiary text-sm">Calculating top 5 finalists…</p>
+                )}
+                {runoffSubs.map((sub, i) => (
+                  <DirectionCard key={sub.id} sub={sub} totalVotes={totalRunoffVotes} rank={i} isOwn={sub.id === mySubmissionId} hasVoted={hasRunoffVoted} votedFor={runoffVotedFor} canVote={canRunoffVote} onVote={handleRunoffVote} index={i} useRunoffVotes={true} />
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── GENERATING / SEALING ── */}
+          {(uiPhase === 'generating' || uiPhase === 'sealing') && (
+            <motion.div key="gen-seal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="py-16">
+              <div className="max-w-lg mx-auto text-center">
+                <div className="w-16 h-16 rounded-full bg-sage-light/60 border border-sage/50 flex items-center justify-center mx-auto mb-6">
+                  {uiPhase === 'generating' ? <Sparkles size={24} className="text-sage-dark animate-pulse" /> : <Zap size={24} className="text-sage-dark animate-pulse" />}
+                </div>
+                <h2 className="font-serif text-2xl text-ink mb-3">
+                  {uiPhase === 'generating' ? 'Gemini is writing the scene' : 'Sealing to Solana devnet'}
+                </h2>
+                {uiPhase === 'generating' && (
+                  <p className="text-ink-tertiary text-sm mb-3">Gemini is taking the top community choice and turning it into the next sealed scene.</p>
+                )}
+                {uiPhase === 'generating' && (
+                  <p className="text-ink-tertiary text-xs mb-8">Gemini 2.5 is writing — usually takes 5–15 seconds</p>
+                )}
+                {uiPhase === 'sealing' && sealStatus && (
+                  <p className="text-ink-tertiary text-sm mb-8 font-mono">{sealStatus}</p>
+                )}
+                {scriptError && uiPhase === 'sealing' && (
+                  <p className="text-amber-400/60 text-xs mb-4">Gemini unavailable — sealing winning direction directly</p>
+                )}
+                {uiPhase === 'generating' && runoffSubs[0] && (
+                  <div className="p-4 rounded-2xl border border-sage/30 bg-sage-light/40 mb-8 text-left">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <div className="text-xs text-sage-dark uppercase tracking-[0.24em] mb-1">Selected direction</div>
+                        <p className="text-[11px] text-ink-tertiary uppercase tracking-[0.2em]">Highest-voted runoff choice</p>
+                      </div>
+                      <div className="px-2.5 py-1 rounded-full border border-sage/30 bg-sage-light/60 text-[11px] text-sage-dark font-mono">
+                        Choice A
+                      </div>
+                    </div>
+                    <p className="text-ink-secondary text-sm leading-7 font-serif">"{runoffSubs[0].content}"</p>
+                  </div>
+                )}
+                <div className="space-y-2.5 text-left">
+                  {[75, 90, 65, 85, 70, 80, 60].map((w, i) => (
+                    <div key={i} className="h-3 bg-straw rounded-full animate-pulse" style={{ width: `${w}%`, animationDelay: `${i * 0.15}s` }} />
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── DONE / SEALED ── */}
+          {uiPhase === 'done' && (
+            <motion.div key="done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-10">
+              <div className="max-w-lg mx-auto">
+                {/* Header */}
+                <div className="text-center mb-8">
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                    className="inline-flex w-16 h-16 rounded-full bg-sage-light/60 border-2 border-sage items-center justify-center mb-4"
+                  >
+                    <svg width="28" height="28" viewBox="0 0 36 36" fill="none">
+                      <path d="M18 4L22 14L33 15.5L25 23L27 34L18 29L9 34L11 23L3 15.5L14 14L18 4Z" fill="rgba(107,143,113,0.18)" stroke="#6B8F71" strokeWidth="1.5" />
+                      <path d="M12 18L16 22L24 14" stroke="#c9a84c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </motion.div>
+                  <h2 className="font-serif text-3xl text-ink mb-2">Scene sealed.</h2>
+                  <p className="text-ink-tertiary text-sm">
+                    Community direction → runoff → Gemini wrote the scene → appended to story
+                  </p>
+                  {txSig && (
+                    <div className="mt-3 px-4 py-1.5 rounded-lg bg-parchment border border-straw inline-block">
+                      <span className="text-xs text-ink-tertiary mr-2">tx</span>
+                      <span className="text-xs font-mono text-ink-tertiary">{txSig.slice(0, 20)}…{txSig.slice(-8)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Gemini script */}
+                {generatedScript && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="overflow-hidden rounded-[28px] border border-sage/30 bg-sage-light/30 mb-6"
+                  >
+                    <div className="border-b border-straw px-6 py-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-sage-dark mb-2">
+                            <Sparkles size={10} />
+                            Gemini Story Desk
+                          </div>
+                          <h3 className="font-serif text-2xl text-ink">Scene approved for seal</h3>
+                          <p className="text-sm text-ink-tertiary mt-1">
+                            The first-place community direction was expanded into the official next story beat for {getRoundLabel(roundIndex)}.
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[11px] uppercase tracking-[0.2em] text-ink-tertiary mb-1">Status</div>
+                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-green-400/20 bg-green-400/5 text-xs text-green-700">
+                            <CheckCircle2 size={12} />
+                            Ready
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedDirection && (
+                      <div className="grid gap-0 border-b border-straw md:grid-cols-[1.15fr_1.85fr]">
+                        <div className="px-6 py-5 border-b border-straw md:border-b-0 md:border-r md:border-straw bg-parchment">
+                          <div className="text-[11px] uppercase tracking-[0.2em] text-ink-tertiary mb-2">Selected direction</div>
+                          <p className="font-serif text-ink-secondary italic leading-7 text-sm">
+                            "{selectedDirection}"
+                          </p>
+                          <p className="text-xs text-ink-tertiary mt-3">This is the winning choice the system used as the source of truth.</p>
+                        </div>
+                        <div className="px-6 py-5">
+                          <div className="text-[11px] uppercase tracking-[0.2em] text-ink-tertiary mb-2">Applied scene</div>
+                          <pre className="font-serif text-ink-secondary text-[15px] leading-8 whitespace-pre-wrap">{generatedScript}</pre>
+                        </div>
+                      </div>
+                    )}
+
+                    {!selectedDirection && (
+                      <div className="px-6 py-5">
+                        <div className="text-[11px] uppercase tracking-[0.2em] text-ink-tertiary mb-2">Applied scene</div>
+                        <pre className="font-serif text-ink-secondary text-[15px] leading-8 whitespace-pre-wrap">{generatedScript}</pre>
+                      </div>
+                    )}
+
+                    <div className="px-6 py-4 bg-parchment flex flex-wrap items-center gap-3 text-xs text-ink-tertiary">
+                      <span className="inline-flex items-center gap-1.5"><Sparkles size={11} className="text-sage-dark" />Editorialized from the winning vote</span>
+                      <span className="inline-flex items-center gap-1.5"><Lock size={11} className="text-sage-dark" />Appended to the story and sealed</span>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* CTA */}
+                <motion.button
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  onClick={() => navigate(`/piece/${pieceId}`, { state: { preserveDemoProgress: true } })}
+                  className="w-full h-12 rounded-full bg-sage text-white font-semibold text-sm hover:brightness-110 transition-all flex items-center justify-center gap-2"
+                >
+                  View full story + next round
+                  <ArrowRight size={14} />
+                </motion.button>
+              </div>
             </motion.div>
           )}
 
