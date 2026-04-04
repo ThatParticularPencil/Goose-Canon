@@ -19,7 +19,7 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-canvas flex flex-col overflow-hidden relative">
-      <DotPattern />
+      <DotPattern width={28} height={28} cr={1.4} fillClassName="fill-ink/25" />
 
       {/* Ambient story titles — ghosted texture */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden select-none" aria-hidden style={{ zIndex: 1 }}>

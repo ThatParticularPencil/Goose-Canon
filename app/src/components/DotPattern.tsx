@@ -12,6 +12,8 @@ interface DotPatternProps {
   cx?: number
   cy?: number
   cr?: number
+  /** Tailwind fill utility — defaults to a subtle tone for content pages. Override for hero backdrops. */
+  fillClassName?: string
   className?: string
 }
 
@@ -21,6 +23,7 @@ export default function DotPattern({
   cx = 1,
   cy = 1,
   cr = 1,
+  fillClassName = 'fill-ink-tertiary/20',
   className,
 }: DotPatternProps) {
   const id = useId()
@@ -29,7 +32,8 @@ export default function DotPattern({
     <svg
       aria-hidden="true"
       className={clsx(
-        'pointer-events-none fixed inset-0 h-full w-full fill-ink-tertiary/20',
+        'pointer-events-none fixed inset-0 h-full w-full',
+        fillClassName,
         'animate-[dotBreathe_6s_ease-in-out_infinite]',
         className,
       )}

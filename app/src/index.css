@@ -144,3 +144,13 @@ body {
 .label {
   @apply font-mono text-label uppercase tracking-[0.08em] text-ink-tertiary;
 }
+
+/* ── Hide scrollbar (used on the bookshelf) ────────────────────────────────── */
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
