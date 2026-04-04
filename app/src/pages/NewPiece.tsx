@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { ArrowRight, CheckCircle2, Lock, AlertCircle, Users, Sparkles, BookOpen, Loader2 } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Lock, AlertCircle, Users, Sparkles, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { sendSolPayment } from '@/utils/solana'
 
@@ -36,6 +36,7 @@ export default function NewPiece() {
   const [submissionHours, setSubmissionHours] = useState(0.5 / 60)  // 30s default
   const [votingHours, setVotingHours]     = useState(0.5 / 60)      // 30s default
   const [maxSubmissions, setMaxSubmissions] = useState(20)
+  const [communityOnly, setCommunityOnly] = useState(true)
   const [submitting, setSubmitting]       = useState(false)
   const [submitStatus, setSubmitStatus]   = useState<string | null>(null)
   const [payError, setPayError]           = useState<string | null>(null)
@@ -186,34 +187,6 @@ export default function NewPiece() {
               />
               <div className="text-xs text-parchment/25 text-right mb-6">{concept.length} / 400</div>
 
-              {/* Structure callout */}
-              <div className="p-4 rounded-xl border border-gold/12 bg-gold/[0.04] mb-8">
-                <div className="flex items-center gap-2 mb-3">
-                  <BookOpen size={12} className="text-gold/60" />
-                  <span className="text-xs font-medium text-gold/60 uppercase tracking-widest">Story structure</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className="rounded-lg border border-parchment/10 bg-parchment/[0.02] px-3 py-2.5">
-                    <p className="text-gold/70 font-medium mb-0.5">Intro</p>
-                    <p className="text-parchment/35">Community votes on the opening scene</p>
-                  </div>
-                  <div className="rounded-lg border border-parchment/10 bg-parchment/[0.02] px-3 py-2.5">
-                    <p className="text-parchment/60 font-medium mb-0.5">Chapters 2–7</p>
-                    <p className="text-parchment/35">6 voting rounds build the middle</p>
-                  </div>
-                  <div className="rounded-lg border border-parchment/10 bg-parchment/[0.02] px-3 py-2.5">
-                    <p className="text-gold/50 font-medium mb-0.5">Conclusion</p>
-                    <p className="text-parchment/35">Final round seals the ending</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex items-start gap-2">
-                  <Sparkles size={11} className="text-gold/40 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-parchment/35 leading-relaxed">
-                    Each round: community submits directions → votes → Gemini writes the scene → you publish it on-chain.
-                  </p>
-                </div>
-              </div>
-
               <StepButton onClick={goNext} disabled={title.trim().length < 3}>
                 Continue
               </StepButton>
@@ -256,24 +229,12 @@ export default function NewPiece() {
                   max={100}
                   hint="Keeps the vote pool readable — we recommend 10–30"
                 />
-
-                {/* Round map */}
-                <div className="rounded-xl border border-parchment/10 bg-parchment/[0.02] p-4">
-                  <p className="text-xs text-parchment/40 mb-3">Round map — {MAX_ROUNDS} rounds total</p>
-                  <div className="flex gap-1 items-end">
-                    {Array.from({ length: MAX_ROUNDS }).map((_, i) => (
-                      <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                        <div className={clsx(
-                          'w-full rounded-sm',
-                          i === 0 || i === MAX_ROUNDS - 1 ? 'bg-gold/40 h-6' : 'bg-parchment/15 h-4'
-                        )} />
-                        <span className="text-[9px] text-parchment/25 text-center hidden sm:block truncate w-full">
-                          {getRoundLabel(i)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <ToggleSetting
+                  label="Community only"
+                  enabled={communityOnly}
+                  onToggle={() => setCommunityOnly(v => !v)}
+                  hint="Only community-tier members can submit directions and vote in rounds."
+                />
               </div>
               <div className="flex items-center gap-4">
                 <button onClick={goBack} className="text-sm text-parchment/35 hover:text-parchment/60 transition-colors">← Back</button>
@@ -297,6 +258,7 @@ export default function NewPiece() {
                 <ConfirmRow label="Submission window"  value={`${submissionHours}h`} />
                 <ConfirmRow label="Voting window"      value={`${votingHours}h`} />
                 <ConfirmRow label="Max submissions"    value={`${maxSubmissions} per round`} />
+                <ConfirmRow label="Access"             value={communityOnly ? 'Community only' : 'Open to all readers'} />
                 <ConfirmRow label="Rounds"             value={`${MAX_ROUNDS} (Intro → 6 Chapters → Conclusion)`} />
                 <ConfirmRow label="Round 1 opens"      value="Immediately after creation" />
                 <ConfirmRow label="Network"            value="Solana Devnet" />
@@ -486,6 +448,40 @@ function SettingInput({ label, value, onChange, unit, min, max, hint }: {
         </div>
       </div>
       <p className="text-xs text-parchment/30">{hint}</p>
+    </div>
+  )
+}
+
+function ToggleSetting({ label, enabled, onToggle, hint }: {
+  label: string
+  enabled: boolean
+  onToggle: () => void
+  hint: string
+}) {
+  return (
+    <div className="rounded-xl border border-parchment/10 bg-parchment/[0.02] p-4">
+      <div className="flex items-center justify-between gap-4 mb-1.5">
+        <div>
+          <label className="text-sm font-medium text-parchment/75">{label}</label>
+          <p className="text-xs text-parchment/30 mt-1">{hint}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className={clsx(
+            'relative inline-flex h-7 w-12 items-center rounded-full border transition-all',
+            enabled ? 'bg-gold/20 border-gold/40' : 'bg-parchment/8 border-parchment/15'
+          )}
+          aria-pressed={enabled}
+        >
+          <span
+            className={clsx(
+              'inline-block h-5 w-5 transform rounded-full transition-transform',
+              enabled ? 'translate-x-6 bg-gold' : 'translate-x-1 bg-parchment/35'
+            )}
+          />
+        </button>
+      </div>
     </div>
   )
 }

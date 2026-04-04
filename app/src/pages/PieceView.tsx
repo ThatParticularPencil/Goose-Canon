@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Lock, ArrowRight, Share2, CheckCircle2, BarChart2, Loader2, Copy, Check, Sparkles } from 'lucide-react'
+import { Lock, ArrowRight, Share2, CheckCircle2, BarChart2, Loader2, Copy, Check, Sparkles, Mic2 } from 'lucide-react'
 import { useRole } from '@/context/RoleContext'
 import SealedParagraphCard from '@/components/SealedParagraphCard'
 import OnChainRecord from '@/components/OnChainRecord'
@@ -12,6 +12,7 @@ import { PublicKey } from '@solana/web3.js'
 import type { SealedParagraph } from '@/types'
 
 const MAX_PARAGRAPHS = 8
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000'
 
 export default function PieceView() {
   const { pieceId } = useParams()
@@ -22,6 +23,9 @@ export default function PieceView() {
   const { role } = useRole()
   const isCreator = role === 'creator'
   const [copied, setCopied] = useState(false)
+  const [narrationUrl, setNarrationUrl] = useState<string | null>(null)
+  const [narrationLoading, setNarrationLoading] = useState(false)
+  const [narrationError, setNarrationError] = useState<string | null>(null)
 
   const preserveDemoProgress = location.state?.preserveDemoProgress === true
   const { piece, loading, error } = usePiece(pieceId, {
@@ -39,6 +43,54 @@ export default function PieceView() {
     navigator.clipboard.writeText(`${piece.title}\n\n${fullScript}`)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (narrationUrl) URL.revokeObjectURL(narrationUrl)
+    }
+  }, [narrationUrl])
+
+  const handleGenerateNarration = async () => {
+    if (!piece) return
+
+    setNarrationLoading(true)
+    setNarrationError(null)
+
+    if (narrationUrl) {
+      URL.revokeObjectURL(narrationUrl)
+      setNarrationUrl(null)
+    }
+
+    const fullScript = piece.paragraphs
+      .map((p, i) => {
+        const label = i === 0 ? 'Opening' : `Scene ${i}`
+        return `${label}.\n${(p as any).content ?? ''}`
+      })
+      .join('\n\n')
+
+    try {
+      const response = await fetch(`${BACKEND}/api/ai/narrate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: piece.title,
+          text: `${piece.title}.\n\n${fullScript}`,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || 'Narration failed')
+      }
+
+      const blob = await response.blob()
+      setNarrationUrl(URL.createObjectURL(blob))
+    } catch (err: any) {
+      setNarrationError(err?.message || 'Narration failed')
+    } finally {
+      setNarrationLoading(false)
+    }
   }
 
   // ── Loading state ──────────────────────────────────────────────────────────
@@ -104,14 +156,25 @@ export default function PieceView() {
             </div>
             <div className="flex items-center gap-1 flex-shrink-0 mt-1">
               {isCreator && piece && piece.paragraphs.length > 0 && (
-                <button
-                  onClick={handleCopyScript}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-parchment/12 text-parchment/40 hover:text-parchment/70 hover:border-parchment/25 transition-all text-xs font-medium"
-                  title="Copy full script"
-                >
-                  {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-                  {copied ? 'Copied!' : 'Copy script'}
-                </button>
+                <>
+                  <button
+                    onClick={handleGenerateNarration}
+                    disabled={narrationLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-parchment/12 text-parchment/40 hover:text-parchment/70 hover:border-parchment/25 transition-all text-xs font-medium disabled:opacity-50 disabled:cursor-wait"
+                    title="Generate voice narration"
+                  >
+                    {narrationLoading ? <Loader2 size={12} className="animate-spin" /> : <Mic2 size={12} />}
+                    {narrationLoading ? 'Narrating…' : narrationUrl ? 'Regenerate voice' : 'Voice narration'}
+                  </button>
+                  <button
+                    onClick={handleCopyScript}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-parchment/12 text-parchment/40 hover:text-parchment/70 hover:border-parchment/25 transition-all text-xs font-medium"
+                    title="Copy full script"
+                  >
+                    {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+                    {copied ? 'Copied!' : 'Copy script'}
+                  </button>
+                </>
               )}
               <button
                 onClick={() => navigator.clipboard.writeText(window.location.href)}
@@ -122,6 +185,19 @@ export default function PieceView() {
               </button>
             </div>
           </div>
+
+          {isCreator && (narrationUrl || narrationError) && (
+            <div className="mt-4 space-y-2">
+              {narrationUrl && (
+                <audio controls src={narrationUrl} className="w-full h-10 opacity-85">
+                  Your browser does not support audio playback.
+                </audio>
+              )}
+              {narrationError && (
+                <p className="text-xs text-amber-400/80">{narrationError}</p>
+              )}
+            </div>
+          )}
 
           {/* Part progress bar */}
           <div className="space-y-3">

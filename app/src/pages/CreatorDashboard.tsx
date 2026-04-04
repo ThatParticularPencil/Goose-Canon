@@ -3,14 +3,17 @@ import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { Plus, ArrowRight, Lock, Eye } from 'lucide-react'
-import { DEMO_PIECE, DEMO_ACTIVE_ROUND } from '@/utils/demo-data'
+import { Plus, ArrowRight, Eye, Loader2, Sparkles } from 'lucide-react'
+import { usePiece } from '@/hooks/usePiece'
 import RoundTimer from '@/components/RoundTimer'
 import { clsx } from 'clsx'
+
+const CREATOR_DEMO_PIECE_ID = 'demo-live-1'
 
 export default function CreatorDashboard() {
   const { publicKey } = useWallet()
   const [activeTab, setActiveTab] = useState<'pieces' | 'subscribers'>('pieces')
+  const { piece, loading } = usePiece(CREATOR_DEMO_PIECE_ID, { resetDemoOnLoad: false })
 
   if (!publicKey) {
     return (
@@ -31,8 +34,6 @@ export default function CreatorDashboard() {
   return (
     <main className="min-h-screen pt-20 pb-24">
       <div className="max-w-3xl mx-auto px-6">
-
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -54,7 +55,6 @@ export default function CreatorDashboard() {
           </Link>
         </motion.div>
 
-        {/* Tabs */}
         <div className="flex items-center gap-6 mb-8 text-sm">
           {(['pieces', 'subscribers'] as const).map(tab => (
             <button
@@ -73,14 +73,16 @@ export default function CreatorDashboard() {
         </div>
 
         {activeTab === 'pieces' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="space-y-5"
-          >
-            <PieceManageCard piece={DEMO_PIECE} activeRound={DEMO_ACTIVE_ROUND} />
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-5">
+            {loading && (
+              <div className="flex items-center gap-2 text-sm text-parchment/35 py-6">
+                <Loader2 size={16} className="animate-spin" />
+                Loading piece state…
+              </div>
+            )}
 
-            {/* Start another */}
+            {piece && <PieceManageCard />}
+
             <Link to="/new">
               <div className="py-8 border border-dashed border-parchment/10 rounded-2xl text-center hover:border-parchment/20 transition-colors cursor-pointer group">
                 <Plus size={16} className="mx-auto text-parchment/20 group-hover:text-parchment/40 mb-2 transition-colors" />
@@ -98,15 +100,16 @@ export default function CreatorDashboard() {
   )
 }
 
-function PieceManageCard({
-  piece,
-  activeRound,
-}: {
-  piece: typeof DEMO_PIECE
-  activeRound: typeof DEMO_ACTIVE_ROUND
-}) {
+function PieceManageCard() {
+  const { piece } = usePiece(CREATOR_DEMO_PIECE_ID, { resetDemoOnLoad: false })
   const [showNote, setShowNote] = useState(false)
   const [note, setNote] = useState('')
+
+  if (!piece || !piece.activeRound) return null
+
+  const activeRound = piece.activeRound
+  const latestParagraph = piece.paragraphs[piece.paragraphs.length - 1]
+  const generatedSceneVisible = piece.paragraphs.length > 1
 
   return (
     <motion.div
@@ -114,7 +117,6 @@ function PieceManageCard({
       animate={{ opacity: 1, y: 0 }}
       className="border border-parchment/10 rounded-2xl overflow-hidden hover:border-parchment/15 transition-colors"
     >
-      {/* Piece header */}
       <div className="p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
@@ -134,15 +136,28 @@ function PieceManageCard({
         <div className="flex items-center gap-4 text-xs text-parchment/30">
           <span>{piece.paragraphCount} parts sealed</span>
           <span>·</span>
-          <span>{piece.roundCount} rounds done</span>
+          <span>{piece.roundCount} rounds total</span>
         </div>
+
+        {generatedSceneVisible && latestParagraph?.content && (
+          <div className="mt-5 p-4 rounded-xl border border-gold/20 bg-gold/[0.04]">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={12} className="text-gold/70" />
+              <span className="text-xs uppercase tracking-widest text-gold/60">Latest sealed scene</span>
+            </div>
+            <p className="text-sm font-serif text-parchment/80 leading-7">
+              {latestParagraph.content}
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Active round stats */}
       <div className="px-6 py-4 border-t border-parchment/6 bg-parchment/[0.015]">
         <div className="flex items-center justify-between mb-3">
           <p className="text-xs text-parchment/40">Round {activeRound.roundIndex + 1} — {activeRound.status}</p>
-          <RoundTimer deadline={activeRound.votingDeadline} label="closes" />
+          {activeRound.status === 'Voting' && <RoundTimer deadline={activeRound.votingDeadline} label="closes" />}
+          {activeRound.status === 'Submissions' && <RoundTimer deadline={activeRound.submissionDeadline} label="closes" />}
+          {activeRound.status === 'Runoff' && <RoundTimer deadline={activeRound.runoffDeadline} label="closes" />}
         </div>
         <div className="flex items-center gap-8 text-sm">
           <div>
@@ -150,13 +165,14 @@ function PieceManageCard({
             <p className="text-xs text-parchment/35 mt-0.5">directions submitted</p>
           </div>
           <div>
-            <p className="text-lg font-mono font-medium text-parchment">{activeRound.totalVotes.toLocaleString()}</p>
+            <p className="text-lg font-mono font-medium text-parchment">
+              {(activeRound.status === 'Runoff' ? activeRound.totalRunoffVotes : activeRound.totalVotes).toLocaleString()}
+            </p>
             <p className="text-xs text-parchment/35 mt-0.5">votes cast</p>
           </div>
         </div>
       </div>
 
-      {/* Actions */}
       <div className="px-6 py-4 border-t border-parchment/6 flex items-center gap-3 flex-wrap">
         <Link to={`/piece/${piece.id}/creator-round/${activeRound.roundIndex}`}>
           <button className="flex items-center gap-1.5 text-sm text-gold/70 hover:text-gold transition-colors">
@@ -218,12 +234,7 @@ function SubscribersPanel() {
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="space-y-6"
-    >
-      {/* Add */}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
       <div className="border border-parchment/10 rounded-2xl p-5">
         <p className="text-sm text-parchment/50 mb-4">Add a subscriber</p>
         <div className="flex gap-3 flex-wrap">
@@ -248,7 +259,6 @@ function SubscribersPanel() {
         </div>
       </div>
 
-      {/* List */}
       <div className="border border-parchment/10 rounded-2xl overflow-hidden">
         <div className="px-5 py-3.5 border-b border-parchment/6">
           <p className="text-xs text-parchment/35">{DEMO_SUBSCRIBERS.length} subscribers</p>
@@ -257,7 +267,6 @@ function SubscribersPanel() {
           {DEMO_SUBSCRIBERS.map((sub, i) => (
             <div key={i} className="px-5 py-3.5 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                {/* Avatar initial */}
                 <div className="w-8 h-8 rounded-full bg-parchment/6 border border-parchment/10 flex items-center justify-center text-xs text-parchment/50 font-serif">
                   {sub.handle.slice(1, 2).toUpperCase()}
                 </div>

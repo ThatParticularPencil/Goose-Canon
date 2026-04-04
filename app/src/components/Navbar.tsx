@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { motion } from 'framer-motion'
-import { PenLine, RefreshCw } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import { useRole } from '@/context/RoleContext'
 
 export default function Navbar() {
@@ -35,16 +35,9 @@ export default function Navbar() {
         {/* Nav links — centered, role-aware */}
         <div className="hidden md:flex items-center gap-7 absolute left-1/2 -translate-x-1/2">
           {role === 'creator' ? (
-            <>
-              <NavLink to="/dashboard" active={isActive('/dashboard')}>
-                Dashboard
-              </NavLink>
-              {publicKey && (
-                <NavLink to="/new" active={isActive('/new')}>
-                  Write
-                </NavLink>
-              )}
-            </>
+            <NavLink to="/dashboard" active={isActive('/dashboard')}>
+              Dashboard
+            </NavLink>
           ) : (
             <NavLink to="/explore" active={isActive('/explore')}>
               Stories
@@ -64,19 +57,7 @@ export default function Navbar() {
             <span className="capitalize">{role}</span>
           </button>
 
-          {role === 'creator' && publicKey && (
-            <Link to="/new">
-              <motion.button
-                whileTap={{ scale: 0.96 }}
-                className="hidden md:flex items-center gap-1.5 text-xs font-medium text-gold/70 hover:text-gold transition-colors"
-              >
-                <PenLine size={13} />
-                New piece
-              </motion.button>
-            </Link>
-          )}
-
-          {role === 'creator' && <WalletMultiButton />}
+          {(role === 'creator' || role === 'viewer') && <WalletMultiButton />}
         </div>
       </div>
 

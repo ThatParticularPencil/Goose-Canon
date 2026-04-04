@@ -35,6 +35,14 @@ export interface LiveActiveRound {
   maxSubmissions:     number
   winningSubmission:  string | null
   creatorNote:        string
+  submissions?: Array<{
+    id: string
+    contributor: string
+    content: string
+    voteCount: number
+    runoffVoteCount: number
+    inRunoff: boolean
+  }>
 }
 
 export interface LivePiece {
@@ -128,6 +136,14 @@ function apiToPiece(data: any): LivePiece {
     maxSubmissions:     ar.maxSubmissions ?? 50,
     winningSubmission:  ar.winningSubmission ?? null,
     creatorNote:        ar.creatorNote ?? '',
+    submissions:        (ar.submissions ?? []).map((s: any) => ({
+      id: s.id,
+      contributor: s.contributor,
+      content: s.content,
+      voteCount: s.voteCount ?? 0,
+      runoffVoteCount: s.runoffVoteCount ?? 0,
+      inRunoff: s.inRunoff ?? false,
+    })),
   } : null
 
   return {
