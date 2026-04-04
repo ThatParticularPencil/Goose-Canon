@@ -27,6 +27,7 @@
     "react-router-dom": "^6.23.0",
     "recharts": "^2.12.4",
     "socket.io-client": "^4.7.5",
+    "three": "^0.183.2",
     "timeago.js": "^4.0.2"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "@types/node": "^20.19.39",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
+    "@types/three": "^0.183.1",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.19",
     "eslint": "^8.57.0",

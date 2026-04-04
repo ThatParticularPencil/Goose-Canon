@@ -1,28 +1,29 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        // ── Surfaces (light parchment theme) ──────────────────────────────────
+        // ── Surfaces — driven by CSS variables (auto light/dark) ──────────────
         ink: {
-          DEFAULT: '#fcf9f1',   // body / base surface
-          50:      '#f6f3eb',   // surface-low: sections, cards
-          100:     '#eeeadf',   // surface-variant: hover states
-          900:     '#fcf9f1',   // alias — used by bg-ink-900 (body bg)
+          DEFAULT: 'rgb(var(--ink-900) / <alpha-value>)',
+          50:      'rgb(var(--ink-50)  / <alpha-value>)',
+          100:     'rgb(var(--ink-100) / <alpha-value>)',
+          900:     'rgb(var(--ink-900) / <alpha-value>)',
         },
-        // ── Text (deep ink) ───────────────────────────────────────────────────
+        // ── Text — driven by CSS variables ────────────────────────────────────
         parchment: {
-          DEFAULT: '#000613',   // primary text — Deep Ink
-          muted:   '#1e2a3a',   // secondary text
-          dim:     '#4a5568',   // tertiary / placeholder text
+          DEFAULT: 'rgb(var(--parchment)       / <alpha-value>)',
+          muted:   'rgb(var(--parchment-muted)  / <alpha-value>)',
+          dim:     'rgb(var(--parchment-dim)    / <alpha-value>)',
         },
-        // ── Accent — Solana Spark ─────────────────────────────────────────────
+        // ── Accent — green highlight system ──────────────────────────────────
         gold: {
-          DEFAULT: '#a661ff',
-          light:   '#c49dff',
-          dark:    '#7c3aed',
-          glow:    'rgba(166,97,255,0.15)',
+          DEFAULT: 'rgb(var(--gold)       / <alpha-value>)',
+          light:   'rgb(var(--gold-light) / <alpha-value>)',
+          dark:    'rgb(var(--gold-dark)  / <alpha-value>)',
+          glow:    'rgba(34,197,94,0.15)',
         },
         amber: {
           story: '#d97706',
@@ -33,15 +34,13 @@ export default {
           glow:   'rgba(219,39,119,0.12)',
         },
         seal: {
-          DEFAULT: '#7c3aed',
-          light:   '#a655f7',
-          glow:    'rgba(124,58,237,0.2)',
+          DEFAULT: '#15803d',
+          light:   '#22c55e',
+          glow:    'rgba(21,128,61,0.2)',
         },
       },
       fontFamily: {
-        // Newsreader — editorial serif for all story/body text
         serif: ['Newsreader', 'Georgia', 'serif'],
-        // Manrope — clean sans for labels, UI, metadata
         sans:  ['Manrope', 'system-ui', 'sans-serif'],
         mono:  ['DM Mono', 'monospace'],
       },
@@ -65,8 +64,8 @@ export default {
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         pulseGold: {
-          '0%, 100%': { boxShadow: '0 0 0 0 rgba(166,97,255,0.35)' },
-          '50%':       { boxShadow: '0 0 0 8px rgba(166,97,255,0)' },
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(34,197,94,0.35)' },
+          '50%':       { boxShadow: '0 0 0 8px rgba(34,197,94,0)' },
         },
         sealStamp: {
           '0%':   { transform: 'scale(0) rotate(-15deg)', opacity: '0' },

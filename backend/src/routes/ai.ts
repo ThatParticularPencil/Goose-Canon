@@ -3,6 +3,8 @@ import { reactToVote, generateScriptFromDirection, reactToSeal } from '../servic
 import { storeGeneratedScript } from '../services/content'
 
 const router = Router()
+const DEFAULT_ELEVENLABS_VOICE_ID = 'EXAVITQu4vr4xnSDxMaL'
+const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2'
 
 function requireGemini(res: any): boolean {
   if (!process.env.GEMINI_API_KEY) {
@@ -15,10 +17,6 @@ function requireGemini(res: any): boolean {
 function requireElevenLabs(res: any): boolean {
   if (!process.env.ELEVENLABS_API_KEY) {
     res.status(503).json({ error: 'ElevenLabs not configured — add ELEVENLABS_API_KEY to backend/.env' })
-    return false
-  }
-  if (!process.env.ELEVENLABS_VOICE_ID) {
-    res.status(503).json({ error: 'ElevenLabs voice missing — add ELEVENLABS_VOICE_ID to backend/.env' })
     return false
   }
   return true
@@ -125,8 +123,8 @@ router.post('/narrate', async (req, res) => {
   if (!text?.trim()) return res.status(400).json({ error: 'text is required' })
   if (!requireElevenLabs(res)) return
 
-  const voiceId = process.env.ELEVENLABS_VOICE_ID as string
-  const modelId = process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2'
+  const voiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_ELEVENLABS_VOICE_ID
+  const modelId = process.env.ELEVENLABS_MODEL_ID || DEFAULT_ELEVENLABS_MODEL_ID
 
   try {
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {

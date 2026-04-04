@@ -11,6 +11,7 @@ import Explore from '@/pages/Explore'
 import NewPiece from '@/pages/NewPiece'
 import Navbar from '@/components/Navbar'
 import { RoleProvider, useRole } from '@/context/RoleContext'
+import { ThemeProvider } from '@/context/ThemeContext'
 
 function AppRoutes() {
   const { role } = useRole()
@@ -28,7 +29,8 @@ function AppRoutes() {
   }
 
   return (
-    <div className="noise-overlay min-h-screen bg-ink-900">
+    <div className="app-shell noise-overlay min-h-screen bg-ink-900">
+      <div className="ambient-dots" aria-hidden />
       <Navbar />
       <AnimatePresence mode="wait">
         <Routes>
@@ -67,8 +69,10 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <RoleProvider>
-      <AppRoutes />
-    </RoleProvider>
+    <ThemeProvider>
+      <RoleProvider>
+        <AppRoutes />
+      </RoleProvider>
+    </ThemeProvider>
   )
 }

@@ -73,7 +73,7 @@ export default function CreatorDashboard() {
         </div>
 
         {activeTab === 'pieces' && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-5">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
             {loading && (
               <div className="flex items-center gap-2 text-sm text-parchment/35 py-6">
                 <Loader2 size={16} className="animate-spin" />
@@ -83,7 +83,7 @@ export default function CreatorDashboard() {
 
             {piece && <PieceManageCard />}
 
-            <Link to="/new">
+            <Link to="/new" className="block pt-1">
               <div className="py-8 border border-dashed border-parchment/10 rounded-2xl text-center hover:border-parchment/20 transition-colors cursor-pointer group">
                 <Plus size={16} className="mx-auto text-parchment/20 group-hover:text-parchment/40 mb-2 transition-colors" />
                 <p className="text-sm text-parchment/25 group-hover:text-parchment/40 transition-colors">

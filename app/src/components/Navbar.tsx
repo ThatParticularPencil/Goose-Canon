@@ -2,13 +2,15 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { motion } from 'framer-motion'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Sun, Moon } from 'lucide-react'
 import { useRole } from '@/context/RoleContext'
+import { useTheme } from '@/context/ThemeContext'
 
 export default function Navbar() {
   const location = useLocation()
   const { publicKey } = useWallet()
   const { role, clearRole } = useRole()
+  const { dark, toggle } = useTheme()
   const navigate = useNavigate()
 
   const isActive = (path: string) =>
@@ -24,10 +26,10 @@ export default function Navbar() {
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
         {/* Logo */}
         <Link to={role === 'viewer' ? '/explore' : '/'} className="flex items-center gap-2.5 group">
-          <div className="w-6 h-6 flex items-center justify-center">
+          <div className="w-6 h-6 flex items-center justify-center -translate-y-[2px]">
             <LockQuillIcon />
           </div>
-          <span className="font-serif text-lg font-semibold text-parchment tracking-tight">
+          <span className="font-serif text-lg leading-none font-semibold text-parchment tracking-tight">
             Storii
           </span>
         </Link>
@@ -47,6 +49,15 @@ export default function Navbar() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
+          {/* Theme toggle */}
+          <button
+            onClick={toggle}
+            className="flex items-center justify-center w-7 h-7 rounded-full border border-parchment/10 hover:border-parchment/25 text-parchment/40 hover:text-parchment/70 transition-all duration-200"
+            title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {dark ? <Sun size={13} /> : <Moon size={13} />}
+          </button>
+
           {/* Role badge + switch */}
           <button
             onClick={handleSwitchRole}
@@ -95,14 +106,33 @@ function NavLink({
 
 function LockQuillIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 18 18" fill="none">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="storii-book-gradient-nav" x1="4.5" y1="3.25" x2="15.5" y2="17.5" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="rgba(249,115,22,0.95)" />
+          <stop offset="45%" stopColor="rgba(74,222,128,0.95)" />
+          <stop offset="100%" stopColor="rgba(21,128,61,0.95)" />
+        </linearGradient>
+        <linearGradient id="storii-book-fill-nav" x1="5" y1="3.25" x2="15.25" y2="15.75" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="rgba(249,115,22,0.18)" />
+          <stop offset="55%" stopColor="rgba(74,222,128,0.16)" />
+          <stop offset="100%" stopColor="rgba(21,128,61,0.16)" />
+        </linearGradient>
+      </defs>
       <path
-        d="M12 4C13.5 5.5, 14 9, 9 12 L7.5 16 L7 14 C5 15, 4 14.5, 3.5 12.5 C6.5 11.5, 10 6.5, 12 4Z"
-        fill="#c9a84c"
-        opacity="0.7"
+        d="M4.5 4.75C4.5 3.92157 5.17157 3.25 6 3.25H15.5V15.75H6.25C5.2835 15.75 4.5 16.5335 4.5 17.5V4.75Z"
+        fill="url(#storii-book-fill-nav)"
       />
-      <rect x="5.5" y="9.5" width="7" height="5.5" rx="1" stroke="#c9a84c" strokeWidth="1.2" fill="none" opacity="0.8" />
-      <path d="M7 9.5 V7 Q9 5 11 7 V9.5" stroke="#c9a84c" strokeWidth="1.2" fill="none" opacity="0.8" />
+      <path
+        d="M4.5 4.75C4.5 3.92157 5.17157 3.25 6 3.25H15.5V15.75H6.25C5.2835 15.75 4.5 16.5335 4.5 17.5M4.5 4.75V17.5M4.5 17.5H13.75"
+        stroke="url(#storii-book-gradient-nav)"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M7.5 6.5H12.75" stroke="url(#storii-book-gradient-nav)" strokeWidth="1.2" strokeLinecap="round" opacity="0.92" />
+      <path d="M7.5 9H12.75" stroke="url(#storii-book-gradient-nav)" strokeWidth="1.2" strokeLinecap="round" opacity="0.74" />
+      <path d="M7.5 11.5H11" stroke="url(#storii-book-gradient-nav)" strokeWidth="1.2" strokeLinecap="round" opacity="0.58" />
     </svg>
   )
 }
