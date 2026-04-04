@@ -1,6 +1,11 @@
 /**
  * Demo data for hackathon presentations.
- * Used when in demo mode (no real wallet / devnet transactions needed).
+ *
+ * Two-stage round flow:
+ *   Stage 1 — Open submission: community submits 50-word directions
+ *   Stage 2 — Top 5 vote: best directions shortlisted, community votes
+ *   Generate — Winning direction fed to Gemini → full professional video script
+ *   Publish  — Creator seals the AI script as the new paragraph on Solana devnet
  */
 
 export const DEMO_PIECE = {
@@ -9,7 +14,7 @@ export const DEMO_PIECE = {
   status: 'Active' as const,
   paragraphCount: 3,
   roundCount: 3,
-  createdAt: Date.now() - 1000 * 60 * 60 * 24 * 2, // 2 days ago
+  createdAt: Date.now() - 1000 * 60 * 60 * 24 * 2,
   creator: '8HQp...3xRt',
   creatorHandle: '@alexchen_builds',
 }
@@ -27,11 +32,12 @@ export const DEMO_PARAGRAPHS = [
     contentHash: 'a3f9c2e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2',
     arweaveUri: 'ar://Qm8xR2k4nP7mL9vB3cD5fH1jK6yZ0wE4tN2sU8',
     sealedBlock: '287,441,203',
+    aiGenerated: false,
   },
   {
     index: 1,
     content:
-      '"Pull request 847," muttered Dev from the corner desk without looking up. He had been there since morning, headphones on, somehow already knowing the root cause. "JWT expiry got pushed to midnight UTC in the staging config but we\'re running on Pacific time in prod." The silence that followed was the kind that makes careers and ends them. Sarah looked at the diff. Twelve characters. Twelve characters that had been quietly sleeping for six months, waiting for this exact moment.',
+      '"Pull request 847," muttered Dev from the corner desk without looking up. He had been there since morning, headphones on, somehow already knowing the root cause. "JWT expiry got pushed to midnight UTC in the staging config but we\'re running on Pacific time in prod." The silence that followed was the kind that makes careers and ends them.',
     author: '3kMn...7pQs',
     authorHandle: '@devsmith_codes',
     voteCount: 142,
@@ -40,11 +46,13 @@ export const DEMO_PARAGRAPHS = [
     contentHash: 'b4g0d3f9c2e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4',
     arweaveUri: 'ar://Rn9yS3l5oQ8mM0wC4eE6gI2kL7xA1vB3',
     sealedBlock: '287,442,891',
+    aiGenerated: true,
+    winningDirection: 'Show the quiet engineer who already knew the answer — reveal the root cause through him, make the silence feel like judgment',
   },
   {
     index: 2,
     content:
-      'The fix took forty seconds. The deploys took eleven minutes. They watched the health checks in complete silence — eight engineers, one product manager, and a very confused intern who had only started on Monday. When the first green checkmark appeared, nobody celebrated. Not because they weren\'t relieved, but because they all understood what it meant: the launch was still happening, and now they had to go explain to the VP of Sales why they\'d been "running security tests" for the last two hours.',
+      'The fix took forty seconds. The deploys took eleven minutes. They watched the health checks in complete silence — eight engineers, one product manager, and a very confused intern who had only started on Monday. When the first green checkmark appeared, nobody celebrated. Not because they weren\'t relieved, but because they all understood what it meant: the launch was still happening.',
     author: '7rTv...2nBw',
     authorHandle: '@maya_writes',
     voteCount: 198,
@@ -53,46 +61,126 @@ export const DEMO_PARAGRAPHS = [
     contentHash: 'c5h1e4g0d3f9c2e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2c5e8b1d4f7a2c5e8',
     arweaveUri: 'ar://So0zT4m6pR9nN1xD5fF7hJ3lM8yB2wC4',
     sealedBlock: '287,443,901',
+    aiGenerated: true,
+    winningDirection: 'Fast-forward to the fix — show the team watching health checks in silence, no celebration, just the weight of what comes next',
   },
 ]
 
-export const DEMO_SUBMISSIONS = [
+// ── Stage 1: All submitted directions (8 total — community pool) ───────────────
+// These are the raw submissions before the top 5 are shortlisted.
+export const DEMO_STAGE1_POOL = [
   {
-    id: 'sub-1',
-    content:
-      'She refreshed the dashboard again. Still red. The on-call Slack channel had twenty-three unread messages and the CTO had sent a calendar invite titled "Post-mortem — Launch Night" forty minutes ago. Outside the office window, San Francisco glittered indifferently. Somewhere in that city, journalists were waiting for the press release. Investors were refreshing their portfolios. And here in this fluorescent-lit room, eight humans were debugging a timezone offset.',
+    id: 'pool-1',
+    content: 'Cut to the whole team watching the dashboard refresh. Nobody speaks. The on-call Slack goes silent. Someone outside — a journalist — is already writing the story of the failed launch.',
     contributor: '5pNm...8kLj',
     contributorHandle: '@techwriter_ravi',
-    voteCount: 89,
-    percentage: 28,
+    voteCount: 0,
   },
   {
-    id: 'sub-2',
-    content:
-      'Marcus, the lead engineer, had seen this exact face before — the face of someone realizing that a problem isn\'t technical at all, it\'s political. "Who has the deploy key?" he asked, already knowing the answer. Three hands went up. Then one came down. Then another. The intern\'s hand stayed raised, trembling slightly. "I rotated them last week," she said quietly. "During the security audit. I thought I updated the environment variables." The room temperature dropped four degrees.',
+    id: 'pool-2',
+    content: 'Reveal it was the intern who rotated the deploy keys during the security audit. She didn\'t update the env variables. Her hand is half-raised, voice barely audible. The room temperature drops.',
     contributor: '2wXq...5mRo',
     contributorHandle: '@storyhunter_em',
-    voteCount: 127,
-    percentage: 40,
+    voteCount: 0,
   },
   {
-    id: 'sub-3',
-    content:
-      '"How long?" asked the VP on speakerphone. His voice had the special flatness of someone who had moved past anger into something colder and more permanent. Sarah typed without looking up. "Twelve minutes to rollback, eight minutes to re-deploy the hotfix, then we need fifteen for smoke tests." The speakerphone breathed. "You have twenty," it said, and went silent. In the background of the call, before it cut off, someone — possibly the CEO — could be heard asking what "rollback" meant.',
+    id: 'pool-3',
+    content: 'VP calls in on speakerphone. He gives them twenty minutes. Cold voice, past anger. In the background before he hangs up the CEO can be heard asking what "rollback" means.',
     contributor: '9cYs...3vPt',
     contributorHandle: '@inkandcode',
-    voteCount: 100,
-    percentage: 32,
+    voteCount: 0,
+  },
+  {
+    id: 'pool-4',
+    content: 'Sarah finds the commit. It\'s six months old. The author deleted their GitHub account. Show her opening the git blame and just staring at a ghost.',
+    contributor: 'bK3p...1rNx',
+    contributorHandle: '@latenight_coder',
+    voteCount: 0,
+  },
+  {
+    id: 'pool-5',
+    content: 'The CTO walks in. No laptop, no urgency. Pours himself coffee. Asks a single question nobody thought to ask. The whole room pivots in five seconds.',
+    contributor: 'qZ7m...4tPy',
+    contributorHandle: '@plotdevice',
+    voteCount: 0,
+  },
+  {
+    id: 'pool-6',
+    content: 'Zoom the timeline — show the exact 47 minutes where everything was fine, then wasn\'t. Three parallel Slack threads. Nobody was watching the same channel.',
+    contributor: 'hV2k...9wQs',
+    contributorHandle: '@seriallogs',
+    voteCount: 0,
+  },
+  {
+    id: 'pool-7',
+    content: 'Show the junior dev who flagged this in code review three weeks ago. His comment was dismissed with "out of scope." He\'s still in the room. He hasn\'t said anything.',
+    contributor: 'nR5c...6dLm',
+    contributorHandle: '@quietengineer',
+    voteCount: 0,
+  },
+  {
+    id: 'pool-8',
+    content: 'Cut to the investor relations team in a glass conference room upstairs. They can see the engineering floor. They\'re pretending not to watch.',
+    contributor: 'fT8j...0xBu',
+    contributorHandle: '@glasswalls',
+    voteCount: 0,
   },
 ]
+
+// ── Stage 2: Top 5 shortlist with vote counts (populated by system) ────────────
+export const DEMO_STAGE2_SHORTLIST = [
+  {
+    id: 'pool-7',
+    content: 'Show the junior dev who flagged this in code review three weeks ago. His comment was dismissed with "out of scope." He\'s still in the room. He hasn\'t said anything.',
+    contributor: 'nR5c...6dLm',
+    contributorHandle: '@quietengineer',
+    voteCount: 143,
+    percentage: 35,
+  },
+  {
+    id: 'pool-3',
+    content: 'VP calls in on speakerphone. He gives them twenty minutes. Cold voice, past anger. In the background before he hangs up the CEO can be heard asking what "rollback" means.',
+    contributor: '9cYs...3vPt',
+    contributorHandle: '@inkandcode',
+    voteCount: 98,
+    percentage: 24,
+  },
+  {
+    id: 'pool-2',
+    content: 'Reveal it was the intern who rotated the deploy keys during the security audit. She didn\'t update the env variables. Her hand is half-raised, voice barely audible. The room temperature drops.',
+    contributor: '2wXq...5mRo',
+    contributorHandle: '@storyhunter_em',
+    voteCount: 87,
+    percentage: 21,
+  },
+  {
+    id: 'pool-5',
+    content: 'The CTO walks in. No laptop, no urgency. Pours himself coffee. Asks a single question nobody thought to ask. The whole room pivots in five seconds.',
+    contributor: 'qZ7m...4tPy',
+    contributorHandle: '@plotdevice',
+    voteCount: 64,
+    percentage: 16,
+  },
+  {
+    id: 'pool-1',
+    content: 'Cut to the whole team watching the dashboard refresh. Nobody speaks. The on-call Slack goes silent. Someone outside — a journalist — is already writing the story of the failed launch.',
+    contributor: '5pNm...8kLj',
+    contributorHandle: '@techwriter_ravi',
+    voteCount: 16,
+    percentage: 4,
+  },
+]
+
+// Legacy alias (used in some pages)
+export const DEMO_SUBMISSIONS = DEMO_STAGE2_SHORTLIST
 
 export const DEMO_ACTIVE_ROUND = {
   roundIndex: 3,
   status: 'Voting' as const,
-  submissionDeadline: Date.now() - 1000 * 60 * 30, // 30 min ago
-  votingDeadline: Date.now() + 1000 * 60 * 60 * 2, // 2 hours from now
-  totalVotes: 316,
-  submissionCount: 3,
+  submissionDeadline: Date.now() - 1000 * 60 * 30,
+  votingDeadline: Date.now() + 1000 * 60 * 60 * 2,
+  totalVotes: 408,
+  submissionCount: 8,
   maxSubmissions: 20,
 }
 
@@ -100,14 +188,14 @@ export const DEMO_CHAIN_RECORD = {
   pieceTitle: 'It Was the Night Before the Product Launch',
   paragraphIndex: 3,
   totalParagraphs: 12,
-  authorWallet: '7rTv...2nBw',
-  votesReceived: 198,
-  totalVotesCast: 310,
+  authorWallet: 'nR5c...6dLm',
+  votesReceived: 143,
+  totalVotesCast: 408,
   sealedBlock: '287,443,901',
-  sealedAt: 'Block 287,443,901 — April 3, 2026, 14:32 UTC',
-  contentHash: 'c5h1e4...b1d4f7',
-  arweaveUri: 'ar://So0zT4m6pR9nN1xD5fF7hJ3lM8yB2wC4',
-  programId: 'STRYLKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx1',
+  sealedAt: 'Block 287,443,901 — April 4, 2026, 14:32 UTC',
+  contentHash: 'e7f2a1...d9c4b8',
+  arweaveUri: 'ar://Tv1wU5n7qS0oO3xE6gG8iK4mN9zA2vC5',
+  programId: 'ahWw6JRQVTsE5NQoEJC7kXcE5ZYU3KZS6jEU9V7mx15',
 }
 
 export const DEMO_PIECES_EXPLORE = [

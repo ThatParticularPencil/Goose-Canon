@@ -271,12 +271,12 @@ pub mod storylock {
     /// PDA seeded from [round, voter] enforces one vote per wallet per round.
     pub fn cast_vote(ctx: Context<CastVote>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
-        let round_key = ctx.accounts.round.key();
+        let round = &ctx.accounts.round;
 
-        require!(ctx.accounts.round.status == RoundStatus::Voting, StoryError::WrongRoundState);
-        require!(now <= ctx.accounts.round.voting_deadline, StoryError::VotingWindowClosed);
+        require!(round.status == RoundStatus::Voting, StoryError::WrongRoundState);
+        require!(now <= round.voting_deadline, StoryError::VotingWindowClosed);
         require!(
-            ctx.accounts.submission.round == round_key,
+            ctx.accounts.submission.round == round.key(),
             StoryError::SubmissionNotInRound
         );
         require!(
@@ -294,7 +294,7 @@ pub mod storylock {
 
         // Record the vote (PDA ensures uniqueness per wallet per round)
         let vote = &mut ctx.accounts.vote;
-        vote.round = round_key;
+        vote.round = round.key();
         vote.submission = ctx.accounts.submission.key();
         vote.voter = ctx.accounts.voter.key();
         vote.cast_at = now;
@@ -304,7 +304,7 @@ pub mod storylock {
         ctx.accounts.round.total_votes += 1;
 
         emit!(VoteCast {
-            round: round_key,
+            round: round.key(),
             submission: vote.submission,
             voter: vote.voter,
             new_vote_count: ctx.accounts.submission.vote_count,

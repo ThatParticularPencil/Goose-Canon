@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Lock, ArrowRight, Users, BarChart2, Share2 } from 'lucide-react'
+import { Lock, ArrowRight, Users, BarChart2, Share2, CheckCircle2 } from 'lucide-react'
+
+const MAX_PARAGRAPHS = 8
 import SealedParagraphCard from '@/components/SealedParagraphCard'
 import OnChainRecord from '@/components/OnChainRecord'
 import RoundTimer from '@/components/RoundTimer'
@@ -74,8 +76,45 @@ export default function PieceView() {
             </span>
           </div>
 
+          {/* Progress bar — X / 8 parts */}
+          <div className="mt-5">
+            <div className="flex items-center justify-between mb-1.5 text-xs text-parchment/40">
+              <span>Story progress</span>
+              <span className={piece.paragraphCount >= MAX_PARAGRAPHS ? 'text-gold font-medium' : ''}>
+                {piece.paragraphCount} / {MAX_PARAGRAPHS} parts
+              </span>
+            </div>
+            <div className="flex gap-1">
+              {Array.from({ length: MAX_PARAGRAPHS }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 flex-1 rounded-full transition-colors ${
+                    i < piece.paragraphCount
+                      ? 'bg-gold'
+                      : 'bg-parchment/10'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Complete banner */}
+          {piece.paragraphCount >= MAX_PARAGRAPHS && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 flex items-center gap-3 p-3.5 rounded-xl bg-gold/8 border border-gold/20"
+            >
+              <CheckCircle2 size={16} className="text-gold flex-shrink-0" />
+              <div className="text-sm text-parchment/80">
+                <span className="text-gold font-medium">Story complete.</span>{' '}
+                All {MAX_PARAGRAPHS} parts have been sealed on-chain.
+              </div>
+            </motion.div>
+          )}
+
           {/* Active round timer */}
-          {activeRound && activeRound.status === 'Voting' && (
+          {piece.paragraphCount < MAX_PARAGRAPHS && activeRound && activeRound.status === 'Voting' && (
             <div className="mt-5 flex items-center justify-between p-4 rounded-xl bg-green-400/5 border border-green-400/15">
               <RoundTimer
                 deadline={activeRound.votingDeadline}
@@ -108,8 +147,8 @@ export default function PieceView() {
           ))}
         </div>
 
-        {/* "Story continues…" prompt if active round */}
-        {activeRound && (
+        {/* "Story continues…" prompt if active round and not complete */}
+        {activeRound && piece.paragraphCount < MAX_PARAGRAPHS && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

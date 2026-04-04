@@ -86,7 +86,7 @@ export interface DemoSubmission {
   contributor: string
   contributorHandle: string
   voteCount: number
-  percentage: number
+  percentage?: number
 }
 
 export interface ChainRecord {

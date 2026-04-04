@@ -1,28 +1,30 @@
 import { Router } from 'express'
-import { reactToVote, reactToSeal } from '../services/gemini'
+import { reactToVote, generateScriptFromDirection, reactToSeal } from '../services/gemini'
 
 const router = Router()
 
+function requireGemini(res: any): boolean {
+  if (!process.env.GEMINI_API_KEY) {
+    res.status(503).json({ error: 'Gemini not configured — add GEMINI_API_KEY to backend/.env' })
+    return false
+  }
+  return true
+}
+
 /**
  * POST /api/ai/vote-reaction
- * Called when a user casts a vote — returns a Gemini reaction to the paragraph.
+ * User just voted for a direction — return a 1-2 sentence literary reaction.
  */
 router.post('/vote-reaction', async (req, res) => {
-  const { paragraphText, voteCount } = req.body as {
-    paragraphText?: string
+  const { directionText, voteCount } = req.body as {
+    directionText?: string
     voteCount?: number
   }
-
-  if (!paragraphText) {
-    return res.status(400).json({ error: 'paragraphText is required' })
-  }
-
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'Gemini not configured (GEMINI_API_KEY missing)' })
-  }
+  if (!directionText) return res.status(400).json({ error: 'directionText is required' })
+  if (!requireGemini(res)) return
 
   try {
-    const reaction = await reactToVote(paragraphText, voteCount ?? 1)
+    const reaction = await reactToVote(directionText, voteCount ?? 1)
     res.json({ reaction })
   } catch (err: any) {
     console.error('[gemini] vote-reaction error:', err?.message)
@@ -31,25 +33,46 @@ router.post('/vote-reaction', async (req, res) => {
 })
 
 /**
- * POST /api/ai/seal-reaction
- * Called when the winning paragraph is sealed — returns analysis + next-chapter teaser.
+ * POST /api/ai/generate-script
+ * Winning direction chosen — Gemini writes the full professional TV script scene.
+ * This is the "official paragraph" the creator reviews before publishing on-chain.
  */
-router.post('/seal-reaction', async (req, res) => {
-  const { winningParagraph, storyContext } = req.body as {
-    winningParagraph?: string
+router.post('/generate-script', async (req, res) => {
+  const { winningDirection, storyContext, pieceTitle } = req.body as {
+    winningDirection?: string
     storyContext?: string
+    pieceTitle?: string
   }
-
-  if (!winningParagraph) {
-    return res.status(400).json({ error: 'winningParagraph is required' })
-  }
-
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'Gemini not configured (GEMINI_API_KEY missing)' })
-  }
+  if (!winningDirection) return res.status(400).json({ error: 'winningDirection is required' })
+  if (!requireGemini(res)) return
 
   try {
-    const reaction = await reactToSeal(winningParagraph, storyContext ?? '')
+    const script = await generateScriptFromDirection(
+      winningDirection,
+      storyContext ?? '',
+      pieceTitle ?? 'Untitled'
+    )
+    res.json({ script })
+  } catch (err: any) {
+    console.error('[gemini] generate-script error:', err?.message)
+    res.status(500).json({ error: 'Gemini request failed' })
+  }
+})
+
+/**
+ * POST /api/ai/seal-reaction
+ * After the creator publishes the script on-chain — return a brief literary analysis.
+ */
+router.post('/seal-reaction', async (req, res) => {
+  const { sealedScript, pieceTitle } = req.body as {
+    sealedScript?: string
+    pieceTitle?: string
+  }
+  if (!sealedScript) return res.status(400).json({ error: 'sealedScript is required' })
+  if (!requireGemini(res)) return
+
+  try {
+    const reaction = await reactToSeal(sealedScript, pieceTitle ?? 'Untitled')
     res.json({ reaction })
   } catch (err: any) {
     console.error('[gemini] seal-reaction error:', err?.message)

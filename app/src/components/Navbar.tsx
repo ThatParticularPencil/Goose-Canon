@@ -1,9 +1,11 @@
 import { Link, useLocation } from 'react-router-dom'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { motion } from 'framer-motion'
 
 export default function Navbar() {
   const location = useLocation()
+  const { publicKey } = useWallet()
 
   const isActive = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/')
@@ -32,9 +34,12 @@ export default function Navbar() {
           <NavLink to="/dashboard" active={isActive('/dashboard')}>
             Dashboard
           </NavLink>
-          <NavLink to="/new" active={isActive('/new')}>
-            + New Piece
-          </NavLink>
+          {/* Only creators (connected wallets) see + New Piece */}
+          {publicKey && (
+            <NavLink to="/new" active={isActive('/new')}>
+              + New Piece
+            </NavLink>
+          )}
         </div>
 
         {/* Wallet */}
