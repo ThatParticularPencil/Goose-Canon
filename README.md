@@ -1,4 +1,4 @@
-# Storylock
+# Storii
 
 > Write together. Sealed forever.
 
