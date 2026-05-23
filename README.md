@@ -4,7 +4,7 @@
 
 A Solana-powered collaborative writing platform where creators and their subscribers co-author content paragraph by paragraph, with every vote and winning contribution permanently sealed on-chain.
 
-Built for the **Solana Hackathon 2026** — [Best Use of Solana](https://www.mlh.com/partners/solana) track.
+Built for the **MLH Spring Hackathon** — [Best Use of Solana](https://www.mlh.com/partners/solana) track.
 
 ---
 
